@@ -23,7 +23,7 @@
 
 #define FLINCH_MAJOR_VERSION 0
 #define FLINCH_MINOR_VERSION 1
-#define FLINCH_BUG_VERSION 0
+#define FLINCH_BUG_VERSION 1
 
 // Must match AE_Effect_Global_OutFlags(_2) in FlinchPiPL.r.
 #define FLINCH_OUT_FLAGS                                                                              \
