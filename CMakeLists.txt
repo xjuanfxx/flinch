@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
-# macOS: binario universal (Apple Silicon + Intel). Debe fijarse antes de project().
+# macOS: universal binary (Apple Silicon + Intel). Must be set before project().
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-  set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Arquitecturas de macOS")
-  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "macOS mínimo")
+  set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 
 project(TwitchRework CXX)
@@ -32,12 +32,12 @@ add_executable(test_render tests/test_render.cpp)
 target_link_libraries(test_render PRIVATE twitch_core)
 add_test(NAME render COMMAND test_render)
 
-# --- Plugin de After Effects ------------------------------------------------
+# --- After Effects plugin --------------------------------------------------
 set(AE_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ae_sdk"
-    CACHE PATH "Carpeta con Headers/, Util/ y Resources/ del After Effects SDK")
+    CACHE PATH "Folder with the After Effects SDK Headers/, Util/ and Resources/")
 
 if(NOT EXISTS "${AE_SDK_DIR}/Headers/AE_Effect.h")
-  message(STATUS "AE SDK no encontrado en ${AE_SDK_DIR}: se omite el plugin")
+  message(STATUS "AE SDK not found in ${AE_SDK_DIR}: skipping the plugin")
   return()
 endif()
 
@@ -60,7 +60,7 @@ if(WIN32)
             "-DOUTPUT=${pipl_rc}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/plugin/pipl.cmake"
     DEPENDS "${pipl_src}" "${CMAKE_CURRENT_SOURCE_DIR}/plugin/pipl.cmake"
-    COMMENT "Compilando la PiPL"
+    COMMENT "Compiling the PiPL"
     VERBATIM)
 
   add_library(TwitchRework MODULE ${plugin_sources} "${pipl_rc}")
@@ -68,7 +68,7 @@ if(WIN32)
   target_compile_definitions(TwitchRework PRIVATE MSWindows WIN32 _WINDOWS NOMINMAX)
 
 elseif(APPLE)
-  # La PiPL va como recurso (data fork) en Contents/Resources/TwitchRework.rsrc.
+  # The PiPL ships as a data-fork resource in Contents/Resources/TwitchRework.rsrc.
   execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE macos_sdk
                   OUTPUT_STRIP_TRAILING_WHITESPACE)
   set(pipl_rsrc "${CMAKE_CURRENT_BINARY_DIR}/TwitchRework.rsrc")
@@ -78,7 +78,7 @@ elseif(APPLE)
             -i "${AE_SDK_DIR}/Headers" -i "${AE_SDK_DIR}/Resources"
             -isysroot "${macos_sdk}" "${pipl_src}"
     DEPENDS "${pipl_src}"
-    COMMENT "Compilando la PiPL (Rez)"
+    COMMENT "Compiling the PiPL (Rez)"
     VERBATIM)
   set_source_files_properties("${pipl_rsrc}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
@@ -91,7 +91,7 @@ elseif(APPLE)
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.xjfx.TwitchRework"
     CXX_VISIBILITY_PRESET hidden)
 else()
-  message(STATUS "Plataforma sin soporte para el plugin de AE")
+  message(STATUS "Platform not supported for the AE plugin")
   return()
 endif()
 

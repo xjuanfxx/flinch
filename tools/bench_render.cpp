@@ -1,7 +1,7 @@
-// bench_render — mide el render de N fotogramas a 1920×1080 con la configuración
-// que suele usarse (Scale + Slide con motion blur, Blur y Light activos).
+// bench_render — times the render of N frames at 1920×1080 with a common setup
+// (Scale + Slide with motion blur).
 //
-// Uso: bench_render [fotogramas] [scale_motion_blur%] [rgb_split%] [slide_motion_blur%]
+// Usage: bench_render [frames] [scale_motion_blur%] [rgb_split%] [slide_motion_blur%]
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     p.scale_motion_blur = argc > 2 ? std::atof(argv[2]) : 100;
     p.slide_rgb_split = argc > 3 ? std::atof(argv[3]) : 12;
     p.slide_motion_blur = argc > 4 ? std::atof(argv[4]) : 100;
-    std::printf("hilos: %u | scale mb %.0f%% | rgb split %.0f%% | slide mb %.0f%%\n",
+    std::printf("threads: %u | scale mb %.0f%% | rgb split %.0f%% | slide mb %.0f%%\n",
                 std::thread::hardware_concurrency(), p.scale_motion_blur, p.slide_rgb_split,
                 p.slide_motion_blur);
 
@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
         (st.any_active() ? busy_ms : idle_ms) += ms;
         (st.any_active() ? busy : idle) += 1;
     }
-    std::printf("fotogramas con twitch: %d, media %.1f ms\n", busy, busy ? busy_ms / busy : 0.0);
-    std::printf("fotogramas sin twitch: %d (copia directa en el plugin)\n", idle);
+    std::printf("frames with a twitch: %d, mean %.1f ms\n", busy, busy ? busy_ms / busy : 0.0);
+    std::printf("frames without a twitch: %d (direct copy in the plugin)\n", idle);
     return 0;
 }

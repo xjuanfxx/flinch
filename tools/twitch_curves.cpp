@@ -1,13 +1,13 @@
-// twitch_curves — vuelca el estado por fotograma de cada operador a CSV.
+// twitch_curves — dumps the per-frame state of every operator as CSV.
 //
-// Uso: twitch_curves [opciones] > curvas.csv
-//   --frames N        fotogramas a evaluar (defecto 120)
-//   --fps F           (defecto 30)
-//   --size W H        tamaño de la capa (defecto 1920 1080)
-//   --legacy          patrón aleatorio compatible con Twitch
+// Usage: twitch_curves [options] > curves.csv
+//   --frames N        frames to evaluate (default 120)
+//   --fps F           (default 30)
+//   --size W H        layer size (default 1920 1080)
+//   --legacy          Twitch-compatible random pattern
 //   --speed S --amount A --ease-in E --ease-out E --randmin R --seed S
-//   --tw OP V         Twitches [sec] de un operador (blur|color|light|scale|slide|time)
-//   --amt OP V        Amount de un operador
+//   --tw OP V         Twitches [sec] of an operator (blur|color|light|scale|slide|time)
+//   --amt OP V        Amount of an operator
 //   --light-mode brighter|darker|both
 //   --time-dir both|forward|backward
 //   --spread V --tendency V --split V --slide-mb V --scale-mb V
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&]() -> const char* {
-            if (i + 1 >= argc) fail("falta valor para", argv[i]);
+            if (i + 1 >= argc) fail("missing value for", argv[i]);
             return argv[++i];
         };
         auto num = [&]() { return std::atof(next()); };
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
         else if (a == "--seed") p.seed = std::atoi(next());
         else if (a == "--tw" || a == "--amt") {
             twr::OperatorParams* op = find_op(p, next());
-            if (!op) fail("operador desconocido", argv[i]);
+            if (!op) fail("unknown operator", argv[i]);
             (a == "--tw" ? op->twitches_per_sec : op->amount) = num();
         }
         else if (a == "--light-mode") {
@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         else if (a == "--split") p.slide_rgb_split = num();
         else if (a == "--slide-mb") p.slide_motion_blur = num();
         else if (a == "--scale-mb") p.scale_motion_blur = num();
-        else fail("opción desconocida", argv[i]);
+        else fail("unknown option", argv[i]);
     }
 
     std::printf(

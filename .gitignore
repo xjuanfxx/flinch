@@ -1,13 +1,13 @@
-# Compilación
+# Build output
 build/
 out/
 dist/
 
-# Binarios de Twitch (Video Copilot): no son nuestros, no se suben
+# Twitch binaries (Video Copilot): not ours, never committed
 twitch.aex
 twitch.plugin/
 *.aex
 *.plugin/
 
-# Artefactos del análisis
+# Analysis artifacts
 analysis/*.snapshot

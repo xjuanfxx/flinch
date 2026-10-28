@@ -1,18 +1,18 @@
-"""Dibuja el CSV de twitch_curves como SVG (solo biblioteca estándar).
+"""Plots the twitch_curves CSV as SVG (standard library only).
 
-Uso: python tools/plot_curves.py curvas.csv salida.svg
+Usage: python tools/plot_curves.py curves.csv output.svg
 """
 import csv
 import sys
 
 TRACKS = [
-    ("blur_env", "Blur — envolvente", "#4f7cff"),
-    ("blur_x", "Blur — tamaño X (px)", "#4f7cff"),
-    ("light_gain", "Light — ganancia", "#e0a000"),
-    ("scale_factor", "Scale — factor de muestreo", "#1aa37a"),
-    ("slide_x", "Slide — desplazamiento X (px)", "#d9480f"),
-    ("slide_y", "Slide — desplazamiento Y (px)", "#d9480f"),
-    ("time_offset", "Time — offset (fotogramas)", "#8e44ad"),
+    ("blur_env", "Blur — envelope", "#4f7cff"),
+    ("blur_x", "Blur — size X (px)", "#4f7cff"),
+    ("light_gain", "Light — gain", "#e0a000"),
+    ("scale_factor", "Scale — sampling factor", "#1aa37a"),
+    ("slide_x", "Slide — offset X (px)", "#d9480f"),
+    ("slide_y", "Slide — offset Y (px)", "#d9480f"),
+    ("time_offset", "Time — offset (frames)", "#8e44ad"),
 ]
 
 

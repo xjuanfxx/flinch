@@ -1,7 +1,7 @@
-// TwitchRework.cpp — efecto de After Effects (SmartFX, 8/16/32 bpc).
+// TwitchRework.cpp — After Effects effect (SmartFX, 8/16/32 bpc).
 //
-// Adaptador fino: lee parámetros → twr::evaluate (núcleo) → twr::render_frame.
-// Toda la lógica de los operadores vive en core/include.
+// Thin adapter: read parameters → twr::evaluate (core) → twr::render_frame.
+// All operator logic lives in core/include.
 #include "TwitchRework.h"
 
 #include <climits>
@@ -17,15 +17,15 @@ namespace {
 
 constexpr A_long kInputCheckout = 0;
 
-// Lo que PreRender calcula y SmartRender consume.
+// What PreRender computes and SmartRender consumes.
 struct RenderInfo {
     twr::FrameState state;
     twr::Border border = twr::Border::Mirror;
     double pixel_scale = 1.0;
-    PF_LRect src_rect{};  // buffer de entrada, en coords de capa (con downsample)
-    PF_LRect canvas{};    // lienzo de trabajo: capa completa ∪ entrada
-    PF_LRect out_rect{};  // rectángulo de salida devuelto a AE, en coords de capa
-    bool show_twitch_only = false;  // transparente en los fotogramas sin twitch
+    PF_LRect src_rect{};  // input buffer, in layer coords (downsampled)
+    PF_LRect canvas{};    // working canvas: full layer ∪ input
+    PF_LRect out_rect{};  // output rect returned to AE, in layer coords
+    bool show_twitch_only = false;  // transparent on frames without a twitch
 };
 
 void delete_render_info(void* p) { delete static_cast<RenderInfo*>(p); }
@@ -48,10 +48,10 @@ PF_LRect intersect_rect(const PF_LRect& a, const PF_LRect& b) {
 }
 
 // ---------------------------------------------------------------------------
-// Parámetros
+// Parameters
 // ---------------------------------------------------------------------------
 
-// Número con dos decimales (p. ej. "30.00"), como muestra Twitch.
+// Number with two decimals (e.g. "30.00"), as Twitch shows it.
 PF_Err add_float(PF_InData* in_data, const char* name, double valid_min, double valid_max,
                  double slider_min, double slider_max, double dflt, int index) {
     PF_ParamDef def;
@@ -68,7 +68,7 @@ PF_Err add_int(PF_InData* in_data, const char* name, int lo, int hi, int dflt, i
     return PF_Err_NONE;
 }
 
-// Supervisado: al cambiar, AE nos avisa para atenuar el grupo del operador.
+// Supervised: AE notifies us on change so the operator group can be dimmed.
 PF_Err add_checkbox(PF_InData* in_data, const char* name, bool dflt, int index) {
     PF_ParamDef def;
     PF_ADD_CHECKBOXX(name, dflt ? TRUE : FALSE, PF_ParamFlag_SUPERVISE, disk_id(index));
@@ -91,7 +91,7 @@ PF_Err add_color(PF_InData* in_data, const char* name, A_u_char r, A_u_char g, A
     return PF_Err_NONE;
 }
 
-// `collapsed`: el grupo aparece plegado al aplicar el efecto (como en Twitch).
+// `collapsed`: the group starts folded when the effect is applied (as in Twitch).
 PF_Err begin_group(PF_InData* in_data, const char* name, int index, bool collapsed = false) {
     PF_ParamDef def;
     AEFX_CLR_STRUCT(def);
@@ -107,24 +107,24 @@ PF_Err end_group(PF_InData* in_data, int index) {
     return PF_Err_NONE;
 }
 
-// Bloque común de cada operador: "<Op> Amount" y "<Op> Twitches [sec]".
+// Common block of every operator: "<Op> Amount" and "<Op> Twitches [sec]".
 PF_Err add_operator_head(PF_InData* in_data, const char* name, int start) {
     PF_Err err = PF_Err_NONE;
     const std::string op = name;
-    ERR(begin_group(in_data, name, start));
+    ERR(begin_group(in_data, name, start, true));
     ERR(add_float(in_data, (op + " Amount").c_str(), 0, 10000, 0, 100, 50, start + 1));
     ERR(add_float(in_data, (op + " Twitches [sec]").c_str(), 0, 1000, 0, 50, 1, start + 2));
     return err;
 }
 
-// Nombres, orden y rangos siguen la interfaz de Twitch; valores como números, no porcentajes.
+// Names, order and ranges follow Twitch's UI; values are plain numbers, not percentages.
 PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     PF_Err err = PF_Err_NONE;
 
     ERR(add_float(in_data, "Amount", 0, 10000, 0, 500, 100, P_AMOUNT));
     ERR(add_float(in_data, "Speed", 0, 10000, 0, 500, 5, P_SPEED));
 
-    // Como en Twitch, todos los operadores empiezan desactivados.
+    // As in Twitch, every operator starts disabled.
     ERR(begin_group(in_data, "Enable", P_ENABLE_START, true));
     ERR(add_checkbox(in_data, "Blur", false, P_BLUR_ENABLE));
     ERR(add_checkbox(in_data, "Color", false, P_COLOR_ENABLE));
@@ -200,7 +200,7 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     return err;
 }
 
-// Atenúa el grupo de cada operador desactivado en "Enable", como hace Twitch.
+// Dims the group of every operator disabled in "Enable", like Twitch does.
 PF_Err UpdateParamsUI(PF_InData* in_data, PF_ParamDef* params[]) {
     struct Link {
         int enable, group;
@@ -225,7 +225,7 @@ PF_Err UpdateParamsUI(PF_InData* in_data, PF_ParamDef* params[]) {
 }
 
 // ---------------------------------------------------------------------------
-// Lectura de parámetros en un instante
+// Reading parameters at a given time
 // ---------------------------------------------------------------------------
 
 class ParamReader {
@@ -265,7 +265,7 @@ void read_operator(ParamReader& r, int enable, int start, twr::OperatorParams& o
     op.unique_seed = r.ival(seed_index, err);
 }
 
-// `pixel_scale` convierte el punto Origin (coords con downsample) a resolución completa.
+// `pixel_scale` converts the Origin point (downsampled coords) to full resolution.
 twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_Err& err) {
     ParamReader r(in_data, time);
     twr::Params p;
@@ -308,12 +308,12 @@ twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_
 }
 
 // ---------------------------------------------------------------------------
-// Comandos
+// Commands
 // ---------------------------------------------------------------------------
 
 PF_Err About(PF_InData* in_data, PF_OutData* out_data) {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
-    suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg, "%s v%d.%d\rTwitches aleatorios: blur, color, luz, escala, desplazamiento y tiempo.",
+    suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg, "%s v%d.%d\rRandom twitches: blur, color, light, scale, slide and time.",
                                           TWR_NAME, TWR_MAJOR_VERSION, TWR_MINOR_VERSION);
     return PF_Err_NONE;
 }
@@ -348,10 +348,10 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
     const int64_t frame = int64_t(std::floor(double(now) / step));
     const double fps = double(in_data->time_scale) / step;
 
-    // Time no depende del tamaño de la capa: primero decidimos qué fotograma pedir.
+    // Time does not depend on the layer size: decide first which frame to request.
     const twr::TimeState time = twr::evaluate(p_now, p_prev, frame, fps, 1, 1, mode).time;
 
-    // Pedimos la capa completa: Slide/Scale pueden mostrar cualquier zona.
+    // Request the whole layer: Slide/Scale can reveal any area.
     PF_RenderRequest req = extra->input->output_request;
     req.rect = {-INT_MAX / 4, -INT_MAX / 4, INT_MAX / 4, INT_MAX / 4};
     req.preserve_rgb_of_zero_alpha = TRUE;
@@ -366,9 +366,9 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
     info->state = twr::evaluate(p_now, p_prev, frame, fps, in_result.ref_width, in_result.ref_height, mode);
     info->src_rect = in_result.result_rect;
 
-    // AE solo entrega la zona con contenido (p. ej. el recuadro de un texto bajo una
-    // capa de ajuste). Slide/Scale pueden llevar contenido a cualquier parte, así que
-    // la salida y el lienzo de trabajo cubren siempre la capa completa.
+    // AE only delivers the area with content (e.g. the box of a text under an
+    // adjustment layer). Slide/Scale can move content anywhere, so the output and
+    // the working canvas always cover the whole layer.
     const PF_LRect layer{0, 0, A_long(std::ceil(in_result.ref_width * ds_x)),
                          A_long(std::ceil(in_result.ref_height * ds_x))};
     const PF_LRect max = union_rect(layer, in_result.max_result_rect);
@@ -383,7 +383,7 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
     return err;
 }
 
-// Conversión de buffers AE ↔ twr::Image (RGBA float premultiplicado, 0–1).
+// AE buffer ↔ twr::Image conversion (premultiplied float RGBA, 0–1).
 template <class PixelT>
 struct Channel;
 template <>
@@ -407,7 +407,7 @@ PixelT* row_ptr(PF_EffectWorld* w, int y) {
     return reinterpret_cast<PixelT*>(reinterpret_cast<char*>(w->data) + size_t(y) * w->rowbytes);
 }
 
-// Copia el buffer `w` dentro de `img` con su esquina en (ox, oy); lo que quede fuera se descarta.
+// Copies buffer `w` into `img` with its corner at (ox, oy); anything outside is dropped.
 template <class PixelT>
 void blit_to_image(PF_EffectWorld* w, twr::Image& img, int ox, int oy) {
     const float inv = 1.0f / Channel<PixelT>::kMax;
@@ -437,7 +437,7 @@ void from_image(const twr::Image& img, PF_EffectWorld* w) {
     });
 }
 
-// Copia directa entrada → salida (sin twitch activo). Lo que no cubre la entrada queda transparente.
+// Direct input → output copy (no active twitch). Areas not covered by the input stay transparent.
 template <class PixelT>
 void copy_world(PF_EffectWorld* in, PF_EffectWorld* out, int dx, int dy) {
     for (int y = 0; y < out->height; ++y) {
@@ -464,8 +464,8 @@ template <class PixelT>
 void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& info, const PF_InData* in_data) {
     const PF_LRect& cv = info.canvas;
 
-    // El buffer de salida empieza en la esquina del rectángulo que devolvimos en PreRender.
-    // Si AE entregara otro tamaño, caemos a la convención del SDK (-output_origin).
+    // The output buffer starts at the corner of the rect we returned in PreRender.
+    // If AE hands over a different size, fall back to the SDK convention (-output_origin).
     twr::Placement pl;
     const PF_LRect& o = info.out_rect;
     if (out->width == o.right - o.left && out->height == o.bottom - o.top) {
@@ -477,7 +477,7 @@ void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& inf
     }
     pl.pixel_scale = info.pixel_scale;
 
-    // La mayoría de fotogramas no tienen twitch: copia directa, sin pasar a float.
+    // Most frames have no twitch: copy directly without converting to float.
     if (!info.state.any_active()) {
         if (info.show_twitch_only) {
             clear_world<PixelT>(out);
@@ -488,11 +488,11 @@ void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& inf
         return;
     }
 
-    // Todo se trabaja en coords del lienzo (capa completa); fuera de la entrada es transparente.
+    // Everything works in canvas coords (whole layer); outside the input is transparent.
     twr::Image canvas(cv.right - cv.left, cv.bottom - cv.top);
     blit_to_image<PixelT>(in, canvas, info.src_rect.left - cv.left, info.src_rect.top - cv.top);
 
-    // El origen de Scale viene en coords de capa a resolución completa.
+    // The Scale origin comes in full-resolution layer coords.
     twr::FrameState st = info.state;
     st.scale.origin.x -= cv.left / info.pixel_scale;
     st.scale.origin.y -= cv.top / info.pixel_scale;
@@ -534,7 +534,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
                                                      SPBasicSuite* /*inSPBasicSuitePtr*/,
                                                      const char* /*inHostName*/,
                                                      const char* /*inHostVersion*/) {
-    PF_Err result = PF_Err_INVALID_CALLBACK;  // la macro del SDK escribe en `result`
+    PF_Err result = PF_Err_INVALID_CALLBACK;  // the SDK macro writes to `result`
     result = PF_REGISTER_EFFECT_EXT2(inPtr, inPluginDataCallBackPtr, TWR_NAME, TWR_MATCH_NAME,
                                      TWR_CATEGORY, AE_RESERVED_INFO, "EffectMain", TWR_SUPPORT_URL);
     return result;

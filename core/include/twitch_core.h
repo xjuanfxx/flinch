@@ -1,11 +1,11 @@
-// twitch_core.h — núcleo temporal y aleatorio de Twitch Rework.
+// twitch_core.h — timing and randomness core of Twitch Rework.
 //
-// Implementación nueva escrita a partir de analysis/twitch-operators-spec.md.
-// No depende de After Effects: recibe parámetros y un número de fotograma y
-// devuelve el estado de cada operador. El render (blur, desplazamiento, etc.)
-// vive aparte y solo consume FrameState.
+// New implementation written from analysis/twitch-operators-spec.md.
+// Independent of After Effects: takes parameters and a frame number and
+// returns the state of every operator. Rendering (blur, displacement, etc.)
+// lives elsewhere and only consumes FrameState.
 //
-// Header-only, C++17, sin estado global: es seguro llamarlo desde varios hilos.
+// Header-only, C++17, no global state: safe to call from multiple threads.
 #pragma once
 
 #include <algorithm>
@@ -17,18 +17,18 @@ namespace twr {
 constexpr double kPi = 3.14159265358979323846;
 
 // ---------------------------------------------------------------------------
-// Aleatoriedad determinista
+// Deterministic randomness
 // ---------------------------------------------------------------------------
 
 enum class RandomMode {
-    // Hash sin estado (splitmix64). O(1), recomendado.
+    // Stateless hash (splitmix64). O(1), recommended.
     Stateless,
-    // Reproduce el patrón de Twitch: LCG de la CRT de MSVC sembrado con la
-    // clave y avanzado |slot|+5 pasos. O(slot); solo para comparar con Twitch.
+    // Reproduces Twitch's pattern: the MSVC CRT LCG seeded with the key and
+    // advanced |slot|+5 steps. O(slot); only for comparing against Twitch.
     Legacy,
 };
 
-// Valor en [0,1] determinista para (slot, key).
+// Deterministic value in [0,1] for (slot, key).
 inline double random01(int64_t slot, uint32_t key, RandomMode mode) {
     if (mode == RandomMode::Legacy) {
         const int64_t s = std::max<int64_t>(slot, -4);
@@ -46,27 +46,27 @@ inline double random01(int64_t slot, uint32_t key, RandomMode mode) {
     return double(z >> 11) * (1.0 / 9007199254740991.0);  // 53 bits → [0,1]
 }
 
-// Desplazamientos de cada flujo aleatorio (spec §3).
+// Offset of each random stream (spec §3).
 namespace stream {
 constexpr uint32_t kEvents = 0;
 constexpr uint32_t kSlideSign = 8000;
-constexpr uint32_t kSlideAngle = 19000;      // +0 principal, +1000·(1+canal)
-constexpr uint32_t kSlideChannelAmp = 23000;  // +1000·canal
+constexpr uint32_t kSlideAngle = 19000;      // +0 main, +1000·(1+channel)
+constexpr uint32_t kSlideChannelAmp = 23000;  // +1000·channel
 constexpr uint32_t kBlurAmp = 9000;
 constexpr uint32_t kTimeAmp = 10000;
 constexpr uint32_t kTimeDir = 10001;
 constexpr uint32_t kLightAmp = 11000;
 constexpr uint32_t kColorAmp = 12000;
-constexpr uint32_t kColorJitter = 16000;  // +1000·canal
+constexpr uint32_t kColorJitter = 16000;  // +1000·channel
 constexpr uint32_t kScaleAmp = 13000;
 constexpr uint32_t kScaleOrigin = 26000;  // +0 X, +1000 Y
 }  // namespace stream
 
 // ---------------------------------------------------------------------------
-// Programación de eventos y envolvente (spec §3–§5)
+// Event scheduling and envelope (spec §3–§5)
 // ---------------------------------------------------------------------------
 
-// Fotogramas por ranura; 0 si el operador no se dispara.
+// Frames per slot; 0 if the operator never fires.
 inline int slot_length(double fps, double twitches_per_sec, double speed) {
     const double rate = twitches_per_sec * speed;
     if (rate <= 0.0 || fps <= 0.0) return 0;
@@ -76,8 +76,8 @@ inline int slot_length(double fps, double twitches_per_sec, double speed) {
 inline int64_t slot_of(double t, int n) { return int64_t(std::floor(t / n)); }
 
 struct Events {
-    double prev;  // último evento <= t
-    double next;  // primer evento > t
+    double prev;  // last event <= t
+    double next;  // first event > t
 };
 
 inline double event_time(int64_t slot, int n, uint32_t seed, RandomMode mode) {
@@ -91,7 +91,7 @@ inline Events events_around(double t, int n, uint32_t seed, RandomMode mode) {
     return {event_time(i - 1, n, seed, mode), here};
 }
 
-// Contribuciones de bajada (tras el evento previo) y subida (antes del siguiente).
+// Decay (after the previous event) and attack (before the next one) contributions.
 struct Ramps {
     double out;
     double in;
@@ -101,20 +101,20 @@ inline Ramps ramps(double t, const Events& e, double ease_in, double ease_out) {
     return {1.0 - (t - e.prev) / (ease_out + 1.0), 1.0 - (e.next - t) / (ease_in + 1.0)};
 }
 
-// Triángulo lineal; twitches solapados se combinan con max.
+// Linear triangle; overlapping twitches combine with max.
 inline double envelope(double t, int n, uint32_t seed, double ease_in, double ease_out,
                        RandomMode mode) {
     const Ramps r = ramps(t, events_around(t, n, seed, mode), ease_in, ease_out);
     return std::max(0.0, std::max(r.out, r.in));
 }
 
-// Valor aleatorio por ranura en [minimum, 1].
+// Per-slot random value in [minimum, 1].
 inline double random_range(double t, int n, uint32_t key, double minimum, RandomMode mode) {
     const double u = random01(slot_of(t, n), key, mode);
     return minimum + (1.0 - minimum) * u;
 }
 
-// Valor aleatorio en [0,1] empujado lejos de 0.5 según `minimum` (signo de Slide).
+// Random value in [0,1] pushed away from 0.5 by `minimum` (Slide sign).
 inline double random_polar(double t, int n, uint32_t key, double minimum, RandomMode mode) {
     const double u = random01(slot_of(t, n), key, mode);
     const double m = std::abs(u - 0.5) * 2.0;
@@ -122,9 +122,9 @@ inline double random_polar(double t, int n, uint32_t key, double minimum, Random
     return std::clamp(0.5 + (u - 0.5 <= 0.0 ? -half : half), 0.0, 1.0);
 }
 
-// Envolventes en t-1 y t ajustadas para que el motion blur cubra todo el recorrido:
-// si entre ambas muestras se cruza un pico, el extremo alto pasa a 1; si se cruza
-// el valle entre dos twitches, el extremo bajo pasa a 0.
+// Envelopes at t-1 and t, adjusted so motion blur covers the whole travel:
+// if a peak is crossed between both samples the high end becomes 1; if the
+// valley between two twitches is crossed the low end becomes 0.
 struct EnvelopePair {
     double now;
     double prev;
@@ -142,7 +142,7 @@ inline EnvelopePair envelope_pair(double t, int n, uint32_t seed, double ease_in
     const bool crossed_peak = e0.prev != e1.prev;
     bool crossed_valley = false;
     if (!crossed_peak) {
-        // Mismo par de eventos: ¿cambió la rampa dominante entre t-1 y t?
+        // Same pair of events: did the dominant ramp change between t-1 and t?
         const Ramps s1 = ramps(t, e0, ease_in, ease_out);
         crossed_valley = (r0.in < r0.out && s1.out < s1.in) || (r0.out < r0.in && s1.in < s1.out);
     }
@@ -154,7 +154,7 @@ inline EnvelopePair envelope_pair(double t, int n, uint32_t seed, double ease_in
 }
 
 // ---------------------------------------------------------------------------
-// Parámetros
+// Parameters
 // ---------------------------------------------------------------------------
 
 struct Vec2 {
@@ -167,19 +167,19 @@ struct Rgb {
 struct OperatorParams {
     bool enabled = true;
     double amount = 50.0;           // %
-    double twitches_per_sec = 1.0;  // multiplicado por Params::speed
+    double twitches_per_sec = 1.0;  // multiplied by Params::speed
     int unique_seed = 0;
 };
 
 enum class LightMode { Brighter = 1, Darker = 2, Both = 3 };
 enum class TimeDirection { Both = 1, ForwardOnly = 2, BackwardOnly = 3 };
 
-// Valores tal como los ve el usuario (porcentajes en 0–100 salvo que se indique).
+// Values as the user sees them (percentages in 0–100 unless noted).
 struct Params {
     double amount = 100.0;
     double speed = 5.0;
-    double ease_in = 1.0;   // fotogramas
-    double ease_out = 1.0;  // fotogramas
+    double ease_in = 1.0;   // frames
+    double ease_out = 1.0;  // frames
     double randomize_min = 0.0;
     int seed = 0;
 
@@ -195,7 +195,7 @@ struct Params {
 
     LightMode light_mode = LightMode::Brighter;
 
-    Vec2 scale_origin;  // píxeles de la capa
+    Vec2 scale_origin;  // layer pixels
     double scale_origin_randomize = 0.0;
     double scale_motion_blur = 0.0;
 
@@ -209,14 +209,14 @@ struct Params {
 };
 
 // ---------------------------------------------------------------------------
-// Estado por fotograma
+// Per-frame state
 // ---------------------------------------------------------------------------
 
 struct BlurState {
     bool active = false;
     double envelope = 0.0;
-    double size_x = 0.0, size_y = 0.0;  // píxeles
-    double mix = 0.0;                   // 0…1, controla tint/opacidad/boost
+    double size_x = 0.0, size_y = 0.0;  // pixels
+    double mix = 0.0;                   // 0…1, drives tint/opacity/boost
     double boost = 1.0;
     double opacity = 0.0;
     Rgb tint;
@@ -238,14 +238,14 @@ struct LightState {
 struct ScaleState {
     bool active = false;
     double envelope = 0.0;
-    double factor = 1.0;  // factor de muestreo en t (<1 = acercamiento)
-    double factor_from = 1.0, factor_to = 1.0;  // rango de motion blur
+    double factor = 1.0;  // sampling factor at t (<1 = zoom in)
+    double factor_from = 1.0, factor_to = 1.0;  // motion blur range
     bool motion_blur = false;
     Vec2 origin;
 };
 
-// Desplazamiento en píxeles: `to` es la posición en t; `from` el inicio del trazo
-// de motion blur (igual a `to` si no hay blur).
+// Displacement in pixels: `to` is the position at t; `from` is the start of the
+// motion blur trail (equal to `to` when there is no blur).
 struct Segment {
     Vec2 from, to;
 };
@@ -254,7 +254,7 @@ struct SlideState {
     bool active = false;
     double envelope = 0.0;
     Segment main;
-    Segment channel[3];  // R, G, B (con RGB split)
+    Segment channel[3];  // R, G, B (with RGB split)
     bool rgb_split = false;
     double split_amount = 0.0;  // RGB Split 0…1
     bool motion_blur = false;
@@ -274,24 +274,24 @@ struct FrameState {
     SlideState slide;
     TimeState time;
 
-    // ¿Hay que procesar píxeles? (Time solo cambia qué fotograma se lee.)
+    // Do pixels need processing? (Time only changes which frame is read.)
     bool any_active() const {
         return blur.active || color.active || light.active || scale.active || slide.active;
     }
 };
 
 // ---------------------------------------------------------------------------
-// Evaluación
+// Evaluation
 // ---------------------------------------------------------------------------
 
 namespace detail {
 
 struct Ctx {
-    double t;  // centro del fotograma
+    double t;  // frame center
     double fps;
     double width, height;
-    double gain, gain_prev;  // Amount global / 100, en t y t-1
-    double rmin, rmin_prev;  // Randomize Minimum / 100, en t y t-1
+    double gain, gain_prev;  // global Amount / 100, at t and t-1
+    double rmin, rmin_prev;  // Randomize Minimum / 100, at t and t-1
     double ease_in, ease_out;
     RandomMode mode;
 };
@@ -305,8 +305,8 @@ inline int op_slot(const Params& p, const OperatorParams& op, double fps) {
     return slot_length(fps, op.twitches_per_sec, p.speed);
 }
 
-// Ángulo en convención de brújula de AE (0 = arriba, sentido horario; Y hacia abajo).
-// Magnitud positiva desplaza hacia donde apunta el ángulo, en % del tamaño de la capa.
+// Angle in AE compass convention (0 = up, clockwise; Y points down).
+// A positive magnitude moves toward the angle, in % of the layer size.
 inline Vec2 polar_offset(double magnitude, double angle, double w, double h) {
     return {std::sin(angle) * magnitude * w * 0.01, -std::cos(angle) * magnitude * h * 0.01};
 }
@@ -413,7 +413,7 @@ inline SlideState slide(const Params& now, const Params& prev, const Ctx& c) {
 
     const double base = -1.0 - (now.slide_tendency - 1.0) * 0.5;
     const double dir = now.slide_direction_deg * kPi / 180.0;
-    // Magnitud en % del tamaño de la capa.
+    // Magnitude in % of the layer size.
     const double gain_now = c.gain * now.slide.amount * 2.0 * env.now;
     const double gain_prev = c.gain_prev * prev.slide.amount * 2.0 * env.prev;
     const double t0 = c.t - 1.0;
@@ -473,9 +473,9 @@ inline TimeState time(const Params& p, const Ctx& c) {
 
 }  // namespace detail
 
-// Estado de todos los operadores en `frame`.
-// `prev` son los parámetros evaluados un fotograma antes (para motion blur de
-// Slide/Scale con keyframes); si no están animados, pasa los mismos que `now`.
+// State of every operator at `frame`.
+// `prev` holds the parameters evaluated one frame earlier (for Slide/Scale motion
+// blur with keyframes); if nothing is animated, pass the same as `now`.
 inline FrameState evaluate(const Params& now, const Params& prev, int64_t frame, double fps,
                            double width, double height, RandomMode mode = RandomMode::Stateless) {
     const detail::Ctx c{double(frame) + 0.5, fps,

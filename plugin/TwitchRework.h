@@ -1,4 +1,4 @@
-// TwitchRework.h — declaraciones del efecto de After Effects.
+// TwitchRework.h — declarations of the After Effects effect.
 #pragma once
 
 #define PF_DEEP_COLOR_AWARE 1
@@ -25,7 +25,7 @@
 #define TWR_MINOR_VERSION 1
 #define TWR_BUG_VERSION 0
 
-// Deben coincidir con AE_Effect_Global_OutFlags(_2) en TwitchReworkPiPL.r.
+// Must match AE_Effect_Global_OutFlags(_2) in TwitchReworkPiPL.r.
 #define TWR_OUT_FLAGS                                                                              \
     (PF_OutFlag_WIDE_TIME_INPUT | PF_OutFlag_NON_PARAM_VARY | PF_OutFlag_DEEP_COLOR_AWARE |        \
      PF_OutFlag_SEND_UPDATE_PARAMS_UI)
@@ -33,8 +33,8 @@
     (PF_OutFlag2_PARAM_GROUP_START_COLLAPSED_FLAG | PF_OutFlag2_SUPPORTS_SMART_RENDER |             \
      PF_OutFlag2_FLOAT_COLOR_AWARE | PF_OutFlag2_SUPPORTS_THREADED_RENDERING)
 
-// Índices de parámetros, en el orden en que se añaden en ParamsSetup.
-// La disposición sigue la de Twitch: Enable / Behaviour / Operator Controls.
+// Parameter indices, in the order they are added in ParamsSetup.
+// The layout follows Twitch: Enable / Behaviour / Operator Controls.
 enum {
     P_INPUT = 0,
     P_AMOUNT,
@@ -118,8 +118,8 @@ enum {
     P_NUM_PARAMS
 };
 
-// Disk IDs: identifican cada parámetro en los proyectos guardados.
-// No cambiar ni reutilizar una vez publicado.
+// Disk IDs identify each parameter in saved projects.
+// Never change or reuse them once released.
 inline A_long disk_id(int param_index) { return param_index; }
 
 extern "C" {

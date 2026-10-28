@@ -1,17 +1,17 @@
 #!/bin/sh
-# Instala TwitchRework.plugin en After Effects (macOS).
-# Uso: sh install-mac.sh /ruta/a/TwitchRework.plugin [versión de AE, por defecto 2026]
+# Installs TwitchRework.plugin into After Effects (macOS).
+# Usage: sh install-mac.sh /path/to/TwitchRework.plugin [AE version, default 2026]
 set -e
 
-plugin="${1:?Indica la ruta a TwitchRework.plugin}"
+plugin="${1:?Pass the path to TwitchRework.plugin}"
 version="${2:-2026}"
 dest="/Applications/Adobe After Effects $version/Plug-ins/TwitchRework"
 
-# Quita la marca de "descargado de internet" para que macOS no lo bloquee.
+# Remove the "downloaded from the internet" flag so macOS does not block it.
 xattr -dr com.apple.quarantine "$plugin" 2>/dev/null || true
 
 sudo mkdir -p "$dest"
 sudo rm -rf "$dest/TwitchRework.plugin"
 sudo cp -R "$plugin" "$dest/"
-echo "Instalado en $dest"
-echo "Reinicia After Effects y busca: Efecto > Twitch Rework > Twitch Rework"
+echo "Installed to $dest"
+echo "Restart After Effects and look for: Effect > Twitch Rework > Twitch Rework"

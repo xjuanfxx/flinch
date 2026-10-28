@@ -10,9 +10,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Configurar
+      - name: Configure
         run: cmake -S . -B build
-      - name: Compilar
+      - name: Build
         run: cmake --build build --config Release
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
@@ -25,13 +25,13 @@ jobs:
     runs-on: macos-14  # Apple Silicon
     steps:
       - uses: actions/checkout@v4
-      - name: Configurar
+      - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-      - name: Compilar
+      - name: Build
         run: cmake --build build --config Release -j
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
-      - name: Verificar y firmar (ad hoc)
+      - name: Verify and sign (ad hoc)
         run: |
           plugin=$(find build -name 'TwitchRework.plugin' -type d | head -n 1)
           echo "Bundle: $plugin"

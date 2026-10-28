@@ -1,5 +1,5 @@
-# Copia TwitchRework.aex a la carpeta de plugins de After Effects.
-# Pide permisos de administrador (Program Files está protegido).
+# Copies TwitchRework.aex into the After Effects plug-ins folder.
+# Asks for administrator rights (Program Files is protected).
 param(
     [string]$AeVersion = "2026",
     [string]$Config = "Release"
@@ -19,6 +19,6 @@ if (-not $isAdmin) {
 
 New-Item -ItemType Directory -Force $dst | Out-Null
 Copy-Item $src $dst -Force
-Write-Host "Instalado en $dst"
-Write-Host "Reinicia After Effects y busca: Efecto > Twitch Rework > Twitch Rework"
+Write-Host "Installed to $dst"
+Write-Host "Restart After Effects and look for: Effect > Twitch Rework > Twitch Rework"
 Start-Sleep -Seconds 3
