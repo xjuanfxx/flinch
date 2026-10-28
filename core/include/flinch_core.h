@@ -1,4 +1,4 @@
-// twitch_core.h — timing and randomness core of Twitch Rework.
+// flinch_core.h — timing and randomness core of Flinch.
 //
 // New implementation written from analysis/twitch-operators-spec.md.
 // Independent of After Effects: takes parameters and a frame number and
@@ -12,7 +12,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace twr {
+namespace flinch {
 
 constexpr double kPi = 3.14159265358979323846;
 
@@ -499,4 +499,4 @@ inline FrameState evaluate(const Params& p, int64_t frame, double fps, double wi
     return evaluate(p, p, frame, fps, width, height, mode);
 }
 
-}  // namespace twr
+}  // namespace flinch

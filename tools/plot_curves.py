@@ -1,4 +1,4 @@
-"""Plots the twitch_curves CSV as SVG (standard library only).
+"""Plots the flinch_curves CSV as SVG (standard library only).
 
 Usage: python tools/plot_curves.py curves.csv output.svg
 """

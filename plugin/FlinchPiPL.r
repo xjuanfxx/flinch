@@ -11,10 +11,10 @@ resource 'PiPL' (16000) {
 			AEEffect
 		},
 		Name {
-			"Twitch Rework"
+			"Flinch"
 		},
 		Category {
-			"Twitch Rework"
+			"Flinch"
 		},
 #ifdef AE_OS_WIN
     #if defined(AE_PROC_INTELx64)
@@ -49,7 +49,7 @@ resource 'PiPL' (16000) {
 			0x08001408
 		},
 		AE_Effect_Match_Name {
-			"XJFX TwitchRework"
+			"XJFX Flinch"
 		},
 		AE_Reserved_Info {
 			0

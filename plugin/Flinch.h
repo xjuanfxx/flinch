@@ -1,4 +1,4 @@
-// TwitchRework.h — declarations of the After Effects effect.
+// Flinch.h — declarations of the After Effects effect.
 #pragma once
 
 #define PF_DEEP_COLOR_AWARE 1
@@ -16,20 +16,20 @@
 #include "AEGP_SuiteHandler.h"
 #include "Param_Utils.h"
 
-#define TWR_NAME "Twitch Rework"
-#define TWR_MATCH_NAME "XJFX TwitchRework"
-#define TWR_CATEGORY "Twitch Rework"
-#define TWR_SUPPORT_URL "https://github.com/"
+#define FLINCH_NAME "Flinch"
+#define FLINCH_MATCH_NAME "XJFX Flinch"
+#define FLINCH_CATEGORY "Flinch"
+#define FLINCH_SUPPORT_URL "https://github.com/"
 
-#define TWR_MAJOR_VERSION 0
-#define TWR_MINOR_VERSION 1
-#define TWR_BUG_VERSION 0
+#define FLINCH_MAJOR_VERSION 0
+#define FLINCH_MINOR_VERSION 1
+#define FLINCH_BUG_VERSION 0
 
-// Must match AE_Effect_Global_OutFlags(_2) in TwitchReworkPiPL.r.
-#define TWR_OUT_FLAGS                                                                              \
+// Must match AE_Effect_Global_OutFlags(_2) in FlinchPiPL.r.
+#define FLINCH_OUT_FLAGS                                                                              \
     (PF_OutFlag_WIDE_TIME_INPUT | PF_OutFlag_NON_PARAM_VARY | PF_OutFlag_DEEP_COLOR_AWARE |        \
      PF_OutFlag_SEND_UPDATE_PARAMS_UI)
-#define TWR_OUT_FLAGS2                                                                             \
+#define FLINCH_OUT_FLAGS2                                                                             \
     (PF_OutFlag2_PARAM_GROUP_START_COLLAPSED_FLAG | PF_OutFlag2_SUPPORTS_SMART_RENDER |             \
      PF_OutFlag2_FLOAT_COLOR_AWARE | PF_OutFlag2_SUPPORTS_THREADED_RENDERING)
 

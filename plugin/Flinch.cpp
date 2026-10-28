@@ -1,8 +1,8 @@
-// TwitchRework.cpp — After Effects effect (SmartFX, 8/16/32 bpc).
+// Flinch.cpp — After Effects effect (SmartFX, 8/16/32 bpc).
 //
-// Thin adapter: read parameters → twr::evaluate (core) → twr::render_frame.
+// Thin adapter: read parameters → flinch::evaluate (core) → flinch::render_frame.
 // All operator logic lives in core/include.
-#include "TwitchRework.h"
+#include "Flinch.h"
 
 #include <climits>
 #include <cstring>
@@ -10,8 +10,8 @@
 #include <memory>
 #include <string>
 
-#include "twitch_core.h"
-#include "twitch_render.h"
+#include "flinch_core.h"
+#include "flinch_render.h"
 
 namespace {
 
@@ -19,8 +19,8 @@ constexpr A_long kInputCheckout = 0;
 
 // What PreRender computes and SmartRender consumes.
 struct RenderInfo {
-    twr::FrameState state;
-    twr::Border border = twr::Border::Mirror;
+    flinch::FrameState state;
+    flinch::Border border = flinch::Border::Mirror;
     double pixel_scale = 1.0;
     PF_LRect src_rect{};  // input buffer, in layer coords (downsampled)
     PF_LRect canvas{};    // working canvas: full layer ∪ input
@@ -241,12 +241,12 @@ public:
     bool bval(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return d.u.bd.value != 0; }
     int popup(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return d.u.pd.value; }
     double angle(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return FIX_2_FLOAT(d.u.ad.value); }
-    twr::Rgb color(int i, PF_Err& err) {
+    flinch::Rgb color(int i, PF_Err& err) {
         PF_ParamDef d;
         err |= checkout(i, d);
         return {d.u.cd.value.red / 255.0, d.u.cd.value.green / 255.0, d.u.cd.value.blue / 255.0};
     }
-    twr::Vec2 point(int i, PF_Err& err) {
+    flinch::Vec2 point(int i, PF_Err& err) {
         PF_ParamDef d;
         err |= checkout(i, d);
         return {FIX_2_FLOAT(d.u.td.x_value), FIX_2_FLOAT(d.u.td.y_value)};
@@ -257,7 +257,7 @@ private:
     A_long time_;
 };
 
-void read_operator(ParamReader& r, int enable, int start, twr::OperatorParams& op, int seed_index,
+void read_operator(ParamReader& r, int enable, int start, flinch::OperatorParams& op, int seed_index,
                    PF_Err& err) {
     op.enabled = r.bval(enable, err);
     op.amount = r.fval(start + 1, err);
@@ -266,9 +266,9 @@ void read_operator(ParamReader& r, int enable, int start, twr::OperatorParams& o
 }
 
 // `pixel_scale` converts the Origin point (downsampled coords) to full resolution.
-twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_Err& err) {
+flinch::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_Err& err) {
     ParamReader r(in_data, time);
-    twr::Params p;
+    flinch::Params p;
     p.amount = r.fval(P_AMOUNT, err);
     p.speed = r.fval(P_SPEED, err);
     p.ease_in = r.fval(P_EASE_IN, err);
@@ -287,10 +287,10 @@ twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_
     p.color_randomize = r.fval(P_COLOR_RANDOMIZE, err);
 
     read_operator(r, P_LIGHT_ENABLE, P_LIGHT_START, p.light, P_LIGHT_SEED, err);
-    p.light_mode = static_cast<twr::LightMode>(r.popup(P_LIGHT_MODE, err));
+    p.light_mode = static_cast<flinch::LightMode>(r.popup(P_LIGHT_MODE, err));
 
     read_operator(r, P_SCALE_ENABLE, P_SCALE_START, p.scale, P_SCALE_SEED, err);
-    const twr::Vec2 origin = r.point(P_SCALE_ORIGIN, err);
+    const flinch::Vec2 origin = r.point(P_SCALE_ORIGIN, err);
     p.scale_origin = {origin.x / pixel_scale, origin.y / pixel_scale};
     p.scale_origin_randomize = r.fval(P_SCALE_ORIGIN_RAND, err);
     p.scale_motion_blur = r.fval(P_SCALE_MOTION_BLUR, err);
@@ -303,7 +303,7 @@ twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_
     p.slide_motion_blur = r.fval(P_SLIDE_MOTION_BLUR, err);
 
     read_operator(r, P_TIME_ENABLE, P_TIME_START, p.time, P_TIME_SEED, err);
-    p.time_direction = static_cast<twr::TimeDirection>(r.popup(P_TIME_DIRECTION, err));
+    p.time_direction = static_cast<flinch::TimeDirection>(r.popup(P_TIME_DIRECTION, err));
     return p;
 }
 
@@ -314,15 +314,15 @@ twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_
 PF_Err About(PF_InData* in_data, PF_OutData* out_data) {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
     suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg, "%s v%d.%d\rRandom twitches: blur, color, light, scale, slide and time.",
-                                          TWR_NAME, TWR_MAJOR_VERSION, TWR_MINOR_VERSION);
+                                          FLINCH_NAME, FLINCH_MAJOR_VERSION, FLINCH_MINOR_VERSION);
     return PF_Err_NONE;
 }
 
 PF_Err GlobalSetup(PF_OutData* out_data) {
     out_data->my_version =
-        PF_VERSION(TWR_MAJOR_VERSION, TWR_MINOR_VERSION, TWR_BUG_VERSION, PF_Stage_DEVELOP, 1);
-    out_data->out_flags = TWR_OUT_FLAGS;
-    out_data->out_flags2 = TWR_OUT_FLAGS2;
+        PF_VERSION(FLINCH_MAJOR_VERSION, FLINCH_MINOR_VERSION, FLINCH_BUG_VERSION, PF_Stage_DEVELOP, 1);
+    out_data->out_flags = FLINCH_OUT_FLAGS;
+    out_data->out_flags2 = FLINCH_OUT_FLAGS2;
     return PF_Err_NONE;
 }
 
@@ -335,21 +335,21 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
 
     const A_long now = in_data->current_time;
     const A_long step = in_data->time_step;
-    twr::Params p_now = read_params(in_data, now, ds_x, err);
-    twr::Params p_prev = read_params(in_data, now - step, ds_x, err);
+    flinch::Params p_now = read_params(in_data, now, ds_x, err);
+    flinch::Params p_prev = read_params(in_data, now - step, ds_x, err);
     if (err) return err;
 
     ParamReader r(in_data, now);
-    info->border = static_cast<twr::Border>(r.popup(P_BORDER, err));
+    info->border = static_cast<flinch::Border>(r.popup(P_BORDER, err));
     info->show_twitch_only = r.bval(P_SHOW_TWITCH_ONLY, err);
-    const twr::RandomMode mode =
-        r.popup(P_PATTERN, err) == 2 ? twr::RandomMode::Legacy : twr::RandomMode::Stateless;
+    const flinch::RandomMode mode =
+        r.popup(P_PATTERN, err) == 2 ? flinch::RandomMode::Legacy : flinch::RandomMode::Stateless;
 
     const int64_t frame = int64_t(std::floor(double(now) / step));
     const double fps = double(in_data->time_scale) / step;
 
     // Time does not depend on the layer size: decide first which frame to request.
-    const twr::TimeState time = twr::evaluate(p_now, p_prev, frame, fps, 1, 1, mode).time;
+    const flinch::TimeState time = flinch::evaluate(p_now, p_prev, frame, fps, 1, 1, mode).time;
 
     // Request the whole layer: Slide/Scale can reveal any area.
     PF_RenderRequest req = extra->input->output_request;
@@ -363,7 +363,7 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
                                   &in_result));
     if (err) return err;
 
-    info->state = twr::evaluate(p_now, p_prev, frame, fps, in_result.ref_width, in_result.ref_height, mode);
+    info->state = flinch::evaluate(p_now, p_prev, frame, fps, in_result.ref_width, in_result.ref_height, mode);
     info->src_rect = in_result.result_rect;
 
     // AE only delivers the area with content (e.g. the box of a text under an
@@ -383,7 +383,7 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
     return err;
 }
 
-// AE buffer ↔ twr::Image conversion (premultiplied float RGBA, 0–1).
+// AE buffer ↔ flinch::Image conversion (premultiplied float RGBA, 0–1).
 template <class PixelT>
 struct Channel;
 template <>
@@ -409,9 +409,9 @@ PixelT* row_ptr(PF_EffectWorld* w, int y) {
 
 // Copies buffer `w` into `img` with its corner at (ox, oy); anything outside is dropped.
 template <class PixelT>
-void blit_to_image(PF_EffectWorld* w, twr::Image& img, int ox, int oy) {
+void blit_to_image(PF_EffectWorld* w, flinch::Image& img, int ox, int oy) {
     const float inv = 1.0f / Channel<PixelT>::kMax;
-    twr::parallel_rows(w->height, [&](int y) {
+    flinch::parallel_rows(w->height, [&](int y) {
         const int iy = y + oy;
         if (iy < 0 || iy >= img.height) return;
         const PixelT* row = row_ptr<PixelT>(w, y);
@@ -424,11 +424,11 @@ void blit_to_image(PF_EffectWorld* w, twr::Image& img, int ox, int oy) {
 }
 
 template <class PixelT>
-void from_image(const twr::Image& img, PF_EffectWorld* w) {
-    twr::parallel_rows(w->height, [&](int y) {
+void from_image(const flinch::Image& img, PF_EffectWorld* w) {
+    flinch::parallel_rows(w->height, [&](int y) {
         PixelT* row = row_ptr<PixelT>(w, y);
         for (int x = 0; x < w->width; ++x) {
-            const twr::Pixel& p = img.at(x, y);
+            const flinch::Pixel& p = img.at(x, y);
             row[x].red = Channel<PixelT>::store(p.r);
             row[x].green = Channel<PixelT>::store(p.g);
             row[x].blue = Channel<PixelT>::store(p.b);
@@ -466,7 +466,7 @@ void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& inf
 
     // The output buffer starts at the corner of the rect we returned in PreRender.
     // If AE hands over a different size, fall back to the SDK convention (-output_origin).
-    twr::Placement pl;
+    flinch::Placement pl;
     const PF_LRect& o = info.out_rect;
     if (out->width == o.right - o.left && out->height == o.bottom - o.top) {
         pl.src_x = double(o.left - cv.left);
@@ -489,16 +489,16 @@ void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& inf
     }
 
     // Everything works in canvas coords (whole layer); outside the input is transparent.
-    twr::Image canvas(cv.right - cv.left, cv.bottom - cv.top);
+    flinch::Image canvas(cv.right - cv.left, cv.bottom - cv.top);
     blit_to_image<PixelT>(in, canvas, info.src_rect.left - cv.left, info.src_rect.top - cv.top);
 
     // The Scale origin comes in full-resolution layer coords.
-    twr::FrameState st = info.state;
+    flinch::FrameState st = info.state;
     st.scale.origin.x -= cv.left / info.pixel_scale;
     st.scale.origin.y -= cv.top / info.pixel_scale;
 
-    twr::Image dst(out->width, out->height);
-    twr::render_frame(canvas, dst, st, pl, info.border);
+    flinch::Image dst(out->width, out->height);
+    flinch::render_frame(canvas, dst, st, pl, info.border);
     from_image<PixelT>(dst, out);
 }
 
@@ -535,8 +535,8 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
                                                      const char* /*inHostName*/,
                                                      const char* /*inHostVersion*/) {
     PF_Err result = PF_Err_INVALID_CALLBACK;  // the SDK macro writes to `result`
-    result = PF_REGISTER_EFFECT_EXT2(inPtr, inPluginDataCallBackPtr, TWR_NAME, TWR_MATCH_NAME,
-                                     TWR_CATEGORY, AE_RESERVED_INFO, "EffectMain", TWR_SUPPORT_URL);
+    result = PF_REGISTER_EFFECT_EXT2(inPtr, inPluginDataCallBackPtr, FLINCH_NAME, FLINCH_MATCH_NAME,
+                                     FLINCH_CATEGORY, AE_RESERVED_INFO, "EffectMain", FLINCH_SUPPORT_URL);
     return result;
 }
 

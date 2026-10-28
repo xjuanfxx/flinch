@@ -18,8 +18,8 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
-          name: TwitchRework-windows
-          path: build/Release/TwitchRework.aex
+          name: Flinch-windows
+          path: build/Release/Flinch.aex
 
   macos:
     runs-on: macos-14  # Apple Silicon
@@ -33,15 +33,15 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Verify and sign (ad hoc)
         run: |
-          plugin=$(find build -name 'TwitchRework.plugin' -type d | head -n 1)
+          plugin=$(find build -name 'Flinch.plugin' -type d | head -n 1)
           echo "Bundle: $plugin"
-          lipo -info "$plugin/Contents/MacOS/TwitchRework"
-          test -s "$plugin/Contents/Resources/TwitchRework.rsrc"
+          lipo -info "$plugin/Contents/MacOS/Flinch"
+          test -s "$plugin/Contents/Resources/Flinch.rsrc"
           codesign --force --deep --sign - "$plugin"
           codesign --verify --verbose "$plugin"
           mkdir -p dist
-          ditto -c -k --keepParent "$plugin" dist/TwitchRework-macos.zip
+          ditto -c -k --keepParent "$plugin" dist/Flinch-macos.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: TwitchRework-macos
-          path: dist/TwitchRework-macos.zip
+          name: Flinch-macos
+          path: dist/Flinch-macos.zip

@@ -1,4 +1,4 @@
-// twitch_render.h — applies a FrameState to a premultiplied float RGBA image.
+// flinch_render.h — applies a FrameState to a premultiplied float RGBA image.
 //
 // Independent of After Effects: the plugin converts its 8/16/32-bit buffers to
 // `Image`, calls `render_frame` and converts back, so rendering can be tested
@@ -12,9 +12,9 @@
 #include <thread>
 #include <vector>
 
-#include "twitch_core.h"
+#include "flinch_core.h"
 
-namespace twr {
+namespace flinch {
 
 struct Pixel {
     float r = 0, g = 0, b = 0, a = 0;
@@ -393,4 +393,4 @@ inline void render_frame(const Image& src, Image& dst, const FrameState& st, con
     if (st.light.active || st.color.active) detail::tone(dst, st.light, st.color);
 }
 
-}  // namespace twr
+}  // namespace flinch

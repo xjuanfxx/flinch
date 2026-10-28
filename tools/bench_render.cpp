@@ -6,18 +6,18 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "twitch_render.h"
+#include "flinch_render.h"
 
 int main(int argc, char** argv) {
     const int frames = argc > 1 ? std::atoi(argv[1]) : 60;
     const int w = 1920, h = 1080;
 
-    twr::Image src(w, h);
+    flinch::Image src(w, h);
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
             src.at(x, y) = {float((x * 7) % 255) / 255, float((y * 3) % 255) / 255, 0.5f, 1.0f};
 
-    twr::Params p;
+    flinch::Params p;
     p.speed = 5;
     p.amount = 35;
     p.blur.enabled = p.color.enabled = p.time.enabled = false;
@@ -30,13 +30,13 @@ int main(int argc, char** argv) {
                 std::thread::hardware_concurrency(), p.scale_motion_blur, p.slide_rgb_split,
                 p.slide_motion_blur);
 
-    twr::Image dst(w, h);
+    flinch::Image dst(w, h);
     double busy_ms = 0, idle_ms = 0;
     int busy = 0, idle = 0;
     for (int f = 0; f < frames; ++f) {
-        const twr::FrameState st = twr::evaluate(p, f, 30, w, h);
+        const flinch::FrameState st = flinch::evaluate(p, f, 30, w, h);
         const auto t0 = std::chrono::steady_clock::now();
-        if (st.any_active()) twr::render_frame(src, dst, st, {}, twr::Border::Mirror);
+        if (st.any_active()) flinch::render_frame(src, dst, st, {}, flinch::Border::Mirror);
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         (st.any_active() ? busy_ms : idle_ms) += ms;
         (st.any_active() ? busy : idle) += 1;
