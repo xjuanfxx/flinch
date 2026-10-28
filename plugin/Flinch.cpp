@@ -321,8 +321,7 @@ PF_Err About(PF_InData* in_data, PF_OutData* out_data) {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
     suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
                                           "%s %d.%d.%d\r"
-                                          "Random jolts for your layers.\r\r"
-                                          "xJuanFX",
+                                          "Random jolts for your layers.",
                                           FLINCH_NAME, FLINCH_MAJOR_VERSION, FLINCH_MINOR_VERSION,
                                           FLINCH_BUG_VERSION);
     return PF_Err_NONE;
