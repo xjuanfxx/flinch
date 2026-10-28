@@ -1,0 +1,567 @@
+// TwitchRework.cpp — efecto de After Effects (SmartFX, 8/16/32 bpc).
+//
+// Adaptador fino: lee parámetros → twr::evaluate (núcleo) → twr::render_frame.
+// Toda la lógica de los operadores vive en core/include.
+#include "TwitchRework.h"
+
+#include <climits>
+#include <cstring>
+#include <cstdio>
+#include <memory>
+#include <string>
+
+#include "twitch_core.h"
+#include "twitch_render.h"
+
+namespace {
+
+constexpr A_long kInputCheckout = 0;
+
+// Lo que PreRender calcula y SmartRender consume.
+struct RenderInfo {
+    twr::FrameState state;
+    twr::Border border = twr::Border::Mirror;
+    double pixel_scale = 1.0;
+    PF_LRect src_rect{};  // buffer de entrada, en coords de capa (con downsample)
+    PF_LRect canvas{};    // lienzo de trabajo: capa completa ∪ entrada
+    PF_LRect out_rect{};  // rectángulo de salida devuelto a AE, en coords de capa
+    bool show_twitch_only = false;  // transparente en los fotogramas sin twitch
+};
+
+void delete_render_info(void* p) { delete static_cast<RenderInfo*>(p); }
+
+bool empty_rect(const PF_LRect& r) { return r.right <= r.left || r.bottom <= r.top; }
+
+PF_LRect union_rect(const PF_LRect& a, const PF_LRect& b) {
+    if (empty_rect(a)) return b;
+    if (empty_rect(b)) return a;
+    return {std::min(a.left, b.left), std::min(a.top, b.top), std::max(a.right, b.right),
+            std::max(a.bottom, b.bottom)};
+}
+
+PF_LRect intersect_rect(const PF_LRect& a, const PF_LRect& b) {
+    PF_LRect r{std::max(a.left, b.left), std::max(a.top, b.top), std::min(a.right, b.right),
+               std::min(a.bottom, b.bottom)};
+    if (r.right < r.left) r.right = r.left;
+    if (r.bottom < r.top) r.bottom = r.top;
+    return r;
+}
+
+// ---------------------------------------------------------------------------
+// Parámetros
+// ---------------------------------------------------------------------------
+
+// Número con dos decimales (p. ej. "30.00"), como muestra Twitch.
+PF_Err add_float(PF_InData* in_data, const char* name, double valid_min, double valid_max,
+                 double slider_min, double slider_max, double dflt, int index) {
+    PF_ParamDef def;
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX(name, valid_min, valid_max, slider_min, slider_max, dflt,
+                         PF_Precision_HUNDREDTHS, PF_ValueDisplayFlag_NONE, 0, disk_id(index));
+    return PF_Err_NONE;
+}
+
+PF_Err add_int(PF_InData* in_data, const char* name, int lo, int hi, int dflt, int index) {
+    PF_ParamDef def;
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER(name, lo, hi, lo, hi, dflt, disk_id(index));
+    return PF_Err_NONE;
+}
+
+// Supervisado: al cambiar, AE nos avisa para atenuar el grupo del operador.
+PF_Err add_checkbox(PF_InData* in_data, const char* name, bool dflt, int index) {
+    PF_ParamDef def;
+    PF_ADD_CHECKBOXX(name, dflt ? TRUE : FALSE, PF_ParamFlag_SUPERVISE, disk_id(index));
+    return PF_Err_NONE;
+}
+
+PF_Err add_popup(PF_InData* in_data, const char* name, int choices, int dflt, const char* items,
+                 int index) {
+    PF_ParamDef def;
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUP(name, choices, A_short(dflt), items, disk_id(index));
+    return PF_Err_NONE;
+}
+
+PF_Err add_color(PF_InData* in_data, const char* name, A_u_char r, A_u_char g, A_u_char b,
+                 int index) {
+    PF_ParamDef def;
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_COLOR(name, r, g, b, disk_id(index));
+    return PF_Err_NONE;
+}
+
+// `collapsed`: el grupo aparece plegado al aplicar el efecto (como en Twitch).
+PF_Err begin_group(PF_InData* in_data, const char* name, int index, bool collapsed = false) {
+    PF_ParamDef def;
+    AEFX_CLR_STRUCT(def);
+    if (collapsed) def.flags = PF_ParamFlag_START_COLLAPSED;
+    PF_ADD_TOPIC(name, disk_id(index));
+    return PF_Err_NONE;
+}
+
+PF_Err end_group(PF_InData* in_data, int index) {
+    PF_ParamDef def;
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(disk_id(index));
+    return PF_Err_NONE;
+}
+
+// Bloque común de cada operador: "<Op> Amount" y "<Op> Twitches [sec]".
+PF_Err add_operator_head(PF_InData* in_data, const char* name, int start) {
+    PF_Err err = PF_Err_NONE;
+    const std::string op = name;
+    ERR(begin_group(in_data, name, start));
+    ERR(add_float(in_data, (op + " Amount").c_str(), 0, 10000, 0, 100, 50, start + 1));
+    ERR(add_float(in_data, (op + " Twitches [sec]").c_str(), 0, 1000, 0, 50, 1, start + 2));
+    return err;
+}
+
+// Nombres, orden y rangos siguen la interfaz de Twitch; valores como números, no porcentajes.
+PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
+    PF_Err err = PF_Err_NONE;
+
+    ERR(add_float(in_data, "Amount", 0, 10000, 0, 500, 100, P_AMOUNT));
+    ERR(add_float(in_data, "Speed", 0, 10000, 0, 500, 5, P_SPEED));
+
+    // Como en Twitch, todos los operadores empiezan desactivados.
+    ERR(begin_group(in_data, "Enable", P_ENABLE_START, true));
+    ERR(add_checkbox(in_data, "Blur", false, P_BLUR_ENABLE));
+    ERR(add_checkbox(in_data, "Color", false, P_COLOR_ENABLE));
+    ERR(add_checkbox(in_data, "Light", false, P_LIGHT_ENABLE));
+    ERR(add_checkbox(in_data, "Scale", false, P_SCALE_ENABLE));
+    ERR(add_checkbox(in_data, "Slide", false, P_SLIDE_ENABLE));
+    ERR(add_checkbox(in_data, "Time", false, P_TIME_ENABLE));
+    ERR(end_group(in_data, P_ENABLE_END));
+
+    ERR(begin_group(in_data, "Behaviour", P_BEHAVIOUR_START, true));
+    ERR(add_float(in_data, "Ease In", 0, 100, 0, 5, 1, P_EASE_IN));
+    ERR(add_float(in_data, "Ease Out", 0, 100, 0, 5, 1, P_EASE_OUT));
+    ERR(add_popup(in_data, "Border", 4, 1, "Mirror|Tile|Transparent|Stretch Edges", P_BORDER));
+    ERR(add_checkbox(in_data, "Show Twitch Only", false, P_SHOW_TWITCH_ONLY));
+    ERR(add_int(in_data, "Seed", 0, 999, 0, P_SEED));
+    ERR(add_float(in_data, "Randomize Minimum", 0, 100, 0, 100, 0, P_RAND_MIN));
+    ERR(add_popup(in_data, "Random Pattern", 2, 1, "Modern|Twitch Compatible", P_PATTERN));
+    ERR(end_group(in_data, P_BEHAVIOUR_END));
+
+    ERR(begin_group(in_data, "Operator Controls", P_OPERATORS_START, true));
+
+    ERR(add_operator_head(in_data, "Blur", P_BLUR_START));
+    ERR(add_color(in_data, "Blur Tint", 255, 255, 255, P_BLUR_TINT));
+    ERR(add_float(in_data, "Blur Boost", 0, 1000, 0, 500, 100, P_BLUR_BOOST));
+    ERR(add_float(in_data, "Blur Opacity", 0, 100, 0, 100, 100, P_BLUR_OPACITY));
+    ERR(add_float(in_data, "Blur Aspect", -1, 1, -1, 1, 0, P_BLUR_ASPECT));
+    ERR(add_int(in_data, "Unique Blur Seed", 0, 999, 0, P_BLUR_SEED));
+    ERR(end_group(in_data, P_BLUR_END));
+
+    ERR(add_operator_head(in_data, "Color", P_COLOR_START));
+    ERR(add_color(in_data, "Colorize", 255, 162, 0, P_COLOR_COLORIZE));
+    ERR(add_float(in_data, "Color Randomize", 0, 100, 0, 100, 0, P_COLOR_RANDOMIZE));
+    ERR(add_int(in_data, "Unique Color Seed", 0, 999, 0, P_COLOR_SEED));
+    ERR(end_group(in_data, P_COLOR_END));
+
+    ERR(add_operator_head(in_data, "Light", P_LIGHT_START));
+    ERR(add_popup(in_data, "Light Behaviour", 3, 1, "Brighter|Darker|Both", P_LIGHT_MODE));
+    ERR(add_int(in_data, "Unique Light Seed", 0, 999, 0, P_LIGHT_SEED));
+    ERR(end_group(in_data, P_LIGHT_END));
+
+    ERR(add_operator_head(in_data, "Scale", P_SCALE_START));
+    {
+        PF_ParamDef def;
+        AEFX_CLR_STRUCT(def);
+        PF_ADD_POINT("Scale Origin", 50, 50, FALSE, disk_id(P_SCALE_ORIGIN));
+    }
+    ERR(add_float(in_data, "Scale Origin Randomize", 0, 100, 0, 100, 0, P_SCALE_ORIGIN_RAND));
+    ERR(add_float(in_data, "Scale Motion Blur", 0, 100, 0, 100, 0, P_SCALE_MOTION_BLUR));
+    ERR(add_int(in_data, "Unique Scale Seed", 0, 999, 0, P_SCALE_SEED));
+    ERR(end_group(in_data, P_SCALE_END));
+
+    ERR(add_operator_head(in_data, "Slide", P_SLIDE_START));
+    {
+        PF_ParamDef def;
+        AEFX_CLR_STRUCT(def);
+        PF_ADD_ANGLE("Slide Direction", 0, disk_id(P_SLIDE_DIRECTION));
+    }
+    ERR(add_float(in_data, "Slide Spread", 0, 1, 0, 1, 1, P_SLIDE_SPREAD));
+    ERR(add_float(in_data, "Slide Tendency", -1, 1, -1, 1, 0, P_SLIDE_TENDENCY));
+    ERR(add_float(in_data, "Slide RGB Split", 0, 100, 0, 100, 0, P_SLIDE_RGB_SPLIT));
+    ERR(add_float(in_data, "Slide Motion Blur", 0, 100, 0, 100, 100, P_SLIDE_MOTION_BLUR));
+    ERR(add_int(in_data, "Unique Slide Seed", 0, 999, 0, P_SLIDE_SEED));
+    ERR(end_group(in_data, P_SLIDE_END));
+
+    ERR(add_operator_head(in_data, "Time", P_TIME_START));
+    ERR(add_popup(in_data, "Time Direction", 3, 1, "Both|Forward Only|Backward Only", P_TIME_DIRECTION));
+    ERR(add_int(in_data, "Unique Time Seed", 0, 999, 0, P_TIME_SEED));
+    ERR(end_group(in_data, P_TIME_END));
+
+    ERR(end_group(in_data, P_OPERATORS_END));
+
+    out_data->num_params = P_NUM_PARAMS;
+    return err;
+}
+
+// Atenúa el grupo de cada operador desactivado en "Enable", como hace Twitch.
+PF_Err UpdateParamsUI(PF_InData* in_data, PF_ParamDef* params[]) {
+    struct Link {
+        int enable, group;
+    };
+    static constexpr Link kLinks[] = {
+        {P_BLUR_ENABLE, P_BLUR_START},   {P_COLOR_ENABLE, P_COLOR_START},
+        {P_LIGHT_ENABLE, P_LIGHT_START}, {P_SCALE_ENABLE, P_SCALE_START},
+        {P_SLIDE_ENABLE, P_SLIDE_START}, {P_TIME_ENABLE, P_TIME_START},
+    };
+    PF_Err err = PF_Err_NONE;
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    for (const Link& link : kLinks) {
+        const bool enabled = params[link.enable]->u.bd.value != 0;
+        PF_ParamDef def = *params[link.group];
+        const bool disabled_now = (def.ui_flags & PF_PUI_DISABLED) != 0;
+        if (disabled_now == !enabled) continue;
+        if (enabled) def.ui_flags &= ~PF_PUI_DISABLED;
+        else def.ui_flags |= PF_PUI_DISABLED;
+        ERR(suites.ParamUtilsSuite3()->PF_UpdateParamUI(in_data->effect_ref, link.group, &def));
+    }
+    return err;
+}
+
+// ---------------------------------------------------------------------------
+// Lectura de parámetros en un instante
+// ---------------------------------------------------------------------------
+
+class ParamReader {
+public:
+    ParamReader(PF_InData* in_data, A_long time) : in_data_(in_data), time_(time) {}
+
+    PF_Err checkout(int index, PF_ParamDef& def) {
+        AEFX_CLR_STRUCT(def);
+        return PF_CHECKOUT_PARAM(in_data_, index, time_, in_data_->time_step, in_data_->time_scale, &def);
+    }
+    double fval(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return d.u.fs_d.value; }
+    int ival(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return d.u.sd.value; }
+    bool bval(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return d.u.bd.value != 0; }
+    int popup(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return d.u.pd.value; }
+    double angle(int i, PF_Err& err) { PF_ParamDef d; err |= checkout(i, d); return FIX_2_FLOAT(d.u.ad.value); }
+    twr::Rgb color(int i, PF_Err& err) {
+        PF_ParamDef d;
+        err |= checkout(i, d);
+        return {d.u.cd.value.red / 255.0, d.u.cd.value.green / 255.0, d.u.cd.value.blue / 255.0};
+    }
+    twr::Vec2 point(int i, PF_Err& err) {
+        PF_ParamDef d;
+        err |= checkout(i, d);
+        return {FIX_2_FLOAT(d.u.td.x_value), FIX_2_FLOAT(d.u.td.y_value)};
+    }
+
+private:
+    PF_InData* in_data_;
+    A_long time_;
+};
+
+void read_operator(ParamReader& r, int enable, int start, twr::OperatorParams& op, int seed_index,
+                   PF_Err& err) {
+    op.enabled = r.bval(enable, err);
+    op.amount = r.fval(start + 1, err);
+    op.twitches_per_sec = r.fval(start + 2, err);
+    op.unique_seed = r.ival(seed_index, err);
+}
+
+// `pixel_scale` convierte el punto Origin (coords con downsample) a resolución completa.
+twr::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, PF_Err& err) {
+    ParamReader r(in_data, time);
+    twr::Params p;
+    p.amount = r.fval(P_AMOUNT, err);
+    p.speed = r.fval(P_SPEED, err);
+    p.ease_in = r.fval(P_EASE_IN, err);
+    p.ease_out = r.fval(P_EASE_OUT, err);
+    p.randomize_min = r.fval(P_RAND_MIN, err);
+    p.seed = r.ival(P_SEED, err);
+
+    read_operator(r, P_BLUR_ENABLE, P_BLUR_START, p.blur, P_BLUR_SEED, err);
+    p.blur_aspect = r.fval(P_BLUR_ASPECT, err);
+    p.blur_boost = r.fval(P_BLUR_BOOST, err);
+    p.blur_opacity = r.fval(P_BLUR_OPACITY, err);
+    p.blur_tint = r.color(P_BLUR_TINT, err);
+
+    read_operator(r, P_COLOR_ENABLE, P_COLOR_START, p.color, P_COLOR_SEED, err);
+    p.colorize = r.color(P_COLOR_COLORIZE, err);
+    p.color_randomize = r.fval(P_COLOR_RANDOMIZE, err);
+
+    read_operator(r, P_LIGHT_ENABLE, P_LIGHT_START, p.light, P_LIGHT_SEED, err);
+    p.light_mode = static_cast<twr::LightMode>(r.popup(P_LIGHT_MODE, err));
+
+    read_operator(r, P_SCALE_ENABLE, P_SCALE_START, p.scale, P_SCALE_SEED, err);
+    const twr::Vec2 origin = r.point(P_SCALE_ORIGIN, err);
+    p.scale_origin = {origin.x / pixel_scale, origin.y / pixel_scale};
+    p.scale_origin_randomize = r.fval(P_SCALE_ORIGIN_RAND, err);
+    p.scale_motion_blur = r.fval(P_SCALE_MOTION_BLUR, err);
+
+    read_operator(r, P_SLIDE_ENABLE, P_SLIDE_START, p.slide, P_SLIDE_SEED, err);
+    p.slide_direction_deg = r.angle(P_SLIDE_DIRECTION, err);
+    p.slide_spread = r.fval(P_SLIDE_SPREAD, err);
+    p.slide_tendency = r.fval(P_SLIDE_TENDENCY, err);
+    p.slide_rgb_split = r.fval(P_SLIDE_RGB_SPLIT, err);
+    p.slide_motion_blur = r.fval(P_SLIDE_MOTION_BLUR, err);
+
+    read_operator(r, P_TIME_ENABLE, P_TIME_START, p.time, P_TIME_SEED, err);
+    p.time_direction = static_cast<twr::TimeDirection>(r.popup(P_TIME_DIRECTION, err));
+    return p;
+}
+
+// ---------------------------------------------------------------------------
+// Comandos
+// ---------------------------------------------------------------------------
+
+PF_Err About(PF_InData* in_data, PF_OutData* out_data) {
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg, "%s v%d.%d\rTwitches aleatorios: blur, color, luz, escala, desplazamiento y tiempo.",
+                                          TWR_NAME, TWR_MAJOR_VERSION, TWR_MINOR_VERSION);
+    return PF_Err_NONE;
+}
+
+PF_Err GlobalSetup(PF_OutData* out_data) {
+    out_data->my_version =
+        PF_VERSION(TWR_MAJOR_VERSION, TWR_MINOR_VERSION, TWR_BUG_VERSION, PF_Stage_DEVELOP, 1);
+    out_data->out_flags = TWR_OUT_FLAGS;
+    out_data->out_flags2 = TWR_OUT_FLAGS2;
+    return PF_Err_NONE;
+}
+
+PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra* extra) {
+    PF_Err err = PF_Err_NONE;
+    auto info = std::make_unique<RenderInfo>();
+
+    const double ds_x = double(in_data->downsample_x.num) / in_data->downsample_x.den;
+    info->pixel_scale = ds_x;
+
+    const A_long now = in_data->current_time;
+    const A_long step = in_data->time_step;
+    twr::Params p_now = read_params(in_data, now, ds_x, err);
+    twr::Params p_prev = read_params(in_data, now - step, ds_x, err);
+    if (err) return err;
+
+    ParamReader r(in_data, now);
+    info->border = static_cast<twr::Border>(r.popup(P_BORDER, err));
+    info->show_twitch_only = r.bval(P_SHOW_TWITCH_ONLY, err);
+    const twr::RandomMode mode =
+        r.popup(P_PATTERN, err) == 2 ? twr::RandomMode::Legacy : twr::RandomMode::Stateless;
+
+    const int64_t frame = int64_t(std::floor(double(now) / step));
+    const double fps = double(in_data->time_scale) / step;
+
+    // Time no depende del tamaño de la capa: primero decidimos qué fotograma pedir.
+    const twr::TimeState time = twr::evaluate(p_now, p_prev, frame, fps, 1, 1, mode).time;
+
+    // Pedimos la capa completa: Slide/Scale pueden mostrar cualquier zona.
+    PF_RenderRequest req = extra->input->output_request;
+    req.rect = {-INT_MAX / 4, -INT_MAX / 4, INT_MAX / 4, INT_MAX / 4};
+    req.preserve_rgb_of_zero_alpha = TRUE;
+    req.field = PF_Field_FRAME;
+    PF_CheckoutResult in_result;
+    AEFX_CLR_STRUCT(in_result);
+    ERR(extra->cb->checkout_layer(in_data->effect_ref, P_INPUT, kInputCheckout, &req,
+                                  now + time.frame_offset * step, step, in_data->time_scale,
+                                  &in_result));
+    if (err) return err;
+
+    info->state = twr::evaluate(p_now, p_prev, frame, fps, in_result.ref_width, in_result.ref_height, mode);
+    info->src_rect = in_result.result_rect;
+
+    // AE solo entrega la zona con contenido (p. ej. el recuadro de un texto bajo una
+    // capa de ajuste). Slide/Scale pueden llevar contenido a cualquier parte, así que
+    // la salida y el lienzo de trabajo cubren siempre la capa completa.
+    const PF_LRect layer{0, 0, A_long(std::ceil(in_result.ref_width * ds_x)),
+                         A_long(std::ceil(in_result.ref_height * ds_x))};
+    const PF_LRect max = union_rect(layer, in_result.max_result_rect);
+    info->canvas = union_rect(layer, in_result.result_rect);
+
+    info->out_rect = intersect_rect(extra->input->output_request.rect, max);
+    extra->output->result_rect = info->out_rect;
+    extra->output->max_result_rect = max;
+    extra->output->solid = FALSE;
+    extra->output->pre_render_data = info.release();
+    extra->output->delete_pre_render_data_func = delete_render_info;
+    return err;
+}
+
+// Conversión de buffers AE ↔ twr::Image (RGBA float premultiplicado, 0–1).
+template <class PixelT>
+struct Channel;
+template <>
+struct Channel<PF_Pixel8> {
+    static constexpr float kMax = PF_MAX_CHAN8;
+    static A_u_char store(float v) { return A_u_char(std::clamp(v, 0.0f, 1.0f) * kMax + 0.5f); }
+};
+template <>
+struct Channel<PF_Pixel16> {
+    static constexpr float kMax = PF_MAX_CHAN16;
+    static A_u_short store(float v) { return A_u_short(std::clamp(v, 0.0f, 1.0f) * kMax + 0.5f); }
+};
+template <>
+struct Channel<PF_PixelFloat> {
+    static constexpr float kMax = 1.0f;
+    static PF_FpShort store(float v) { return v; }
+};
+
+template <class PixelT>
+PixelT* row_ptr(PF_EffectWorld* w, int y) {
+    return reinterpret_cast<PixelT*>(reinterpret_cast<char*>(w->data) + size_t(y) * w->rowbytes);
+}
+
+// Copia el buffer `w` dentro de `img` con su esquina en (ox, oy); lo que quede fuera se descarta.
+template <class PixelT>
+void blit_to_image(PF_EffectWorld* w, twr::Image& img, int ox, int oy) {
+    const float inv = 1.0f / Channel<PixelT>::kMax;
+    twr::parallel_rows(w->height, [&](int y) {
+        const int iy = y + oy;
+        if (iy < 0 || iy >= img.height) return;
+        const PixelT* row = row_ptr<PixelT>(w, y);
+        for (int x = 0; x < w->width; ++x) {
+            const int ix = x + ox;
+            if (ix < 0 || ix >= img.width) continue;
+            img.at(ix, iy) = {row[x].red * inv, row[x].green * inv, row[x].blue * inv, row[x].alpha * inv};
+        }
+    });
+}
+
+template <class PixelT>
+void from_image(const twr::Image& img, PF_EffectWorld* w) {
+    twr::parallel_rows(w->height, [&](int y) {
+        PixelT* row = row_ptr<PixelT>(w, y);
+        for (int x = 0; x < w->width; ++x) {
+            const twr::Pixel& p = img.at(x, y);
+            row[x].red = Channel<PixelT>::store(p.r);
+            row[x].green = Channel<PixelT>::store(p.g);
+            row[x].blue = Channel<PixelT>::store(p.b);
+            row[x].alpha = Channel<PixelT>::store(p.a);
+        }
+    });
+}
+
+// Copia directa entrada → salida (sin twitch activo). Lo que no cubre la entrada queda transparente.
+template <class PixelT>
+void copy_world(PF_EffectWorld* in, PF_EffectWorld* out, int dx, int dy) {
+    for (int y = 0; y < out->height; ++y) {
+        PixelT* dst = row_ptr<PixelT>(out, y);
+        const int sy = y + dy;
+        if (sy < 0 || sy >= in->height) {
+            std::memset(dst, 0, sizeof(PixelT) * size_t(out->width));
+            continue;
+        }
+        const PixelT* src = row_ptr<PixelT>(in, sy);
+        for (int x = 0; x < out->width; ++x) {
+            const int sx = x + dx;
+            dst[x] = (sx >= 0 && sx < in->width) ? src[sx] : PixelT{};
+        }
+    }
+}
+
+template <class PixelT>
+void clear_world(PF_EffectWorld* out) {
+    for (int y = 0; y < out->height; ++y) std::memset(row_ptr<PixelT>(out, y), 0, sizeof(PixelT) * size_t(out->width));
+}
+
+template <class PixelT>
+void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& info, const PF_InData* in_data) {
+    const PF_LRect& cv = info.canvas;
+
+    // El buffer de salida empieza en la esquina del rectángulo que devolvimos en PreRender.
+    // Si AE entregara otro tamaño, caemos a la convención del SDK (-output_origin).
+    twr::Placement pl;
+    const PF_LRect& o = info.out_rect;
+    if (out->width == o.right - o.left && out->height == o.bottom - o.top) {
+        pl.src_x = double(o.left - cv.left);
+        pl.src_y = double(o.top - cv.top);
+    } else {
+        pl.src_x = double(info.src_rect.left - in_data->output_origin_x - cv.left);
+        pl.src_y = double(info.src_rect.top - in_data->output_origin_y - cv.top);
+    }
+    pl.pixel_scale = info.pixel_scale;
+
+    // La mayoría de fotogramas no tienen twitch: copia directa, sin pasar a float.
+    if (!info.state.any_active()) {
+        if (info.show_twitch_only) {
+            clear_world<PixelT>(out);
+        } else {
+            copy_world<PixelT>(in, out, int(pl.src_x) - (info.src_rect.left - cv.left),
+                               int(pl.src_y) - (info.src_rect.top - cv.top));
+        }
+        return;
+    }
+
+    // Todo se trabaja en coords del lienzo (capa completa); fuera de la entrada es transparente.
+    twr::Image canvas(cv.right - cv.left, cv.bottom - cv.top);
+    blit_to_image<PixelT>(in, canvas, info.src_rect.left - cv.left, info.src_rect.top - cv.top);
+
+    // El origen de Scale viene en coords de capa a resolución completa.
+    twr::FrameState st = info.state;
+    st.scale.origin.x -= cv.left / info.pixel_scale;
+    st.scale.origin.y -= cv.top / info.pixel_scale;
+
+    twr::Image dst(out->width, out->height);
+    twr::render_frame(canvas, dst, st, pl, info.border);
+    from_image<PixelT>(dst, out);
+}
+
+PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra) {
+    PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
+    const auto* info = static_cast<const RenderInfo*>(extra->input->pre_render_data);
+    if (!info) return PF_Err_BAD_CALLBACK_PARAM;
+
+    PF_EffectWorld *input = nullptr, *output = nullptr;
+    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kInputCheckout, &input));
+    ERR(extra->cb->checkout_output(in_data->effect_ref, &output));
+    if (!err && input && output) {
+        AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data, kPFWorldSuite, kPFWorldSuiteVersion2, out_data);
+        PF_PixelFormat format = PF_PixelFormat_INVALID;
+        ERR(world_suite->PF_GetPixelFormat(input, &format));
+        if (!err) {
+            switch (format) {
+                case PF_PixelFormat_ARGB128: render_world<PF_PixelFloat>(input, output, *info, in_data); break;
+                case PF_PixelFormat_ARGB64: render_world<PF_Pixel16>(input, output, *info, in_data); break;
+                case PF_PixelFormat_ARGB32: render_world<PF_Pixel8>(input, output, *info, in_data); break;
+                default: err = PF_Err_BAD_CALLBACK_PARAM; break;
+            }
+        }
+    }
+    ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, kInputCheckout));
+    return err;
+}
+
+}  // namespace
+
+extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
+                                                     PF_PluginDataCB2 inPluginDataCallBackPtr,
+                                                     SPBasicSuite* /*inSPBasicSuitePtr*/,
+                                                     const char* /*inHostName*/,
+                                                     const char* /*inHostVersion*/) {
+    PF_Err result = PF_Err_INVALID_CALLBACK;  // la macro del SDK escribe en `result`
+    result = PF_REGISTER_EFFECT_EXT2(inPtr, inPluginDataCallBackPtr, TWR_NAME, TWR_MATCH_NAME,
+                                     TWR_CATEGORY, AE_RESERVED_INFO, "EffectMain", TWR_SUPPORT_URL);
+    return result;
+}
+
+PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[],
+                  PF_LayerDef* /*output*/, void* extra) {
+    PF_Err err = PF_Err_NONE;
+    try {
+        switch (cmd) {
+            case PF_Cmd_ABOUT: err = About(in_data, out_data); break;
+            case PF_Cmd_GLOBAL_SETUP: err = GlobalSetup(out_data); break;
+            case PF_Cmd_PARAMS_SETUP: err = ParamsSetup(in_data, out_data); break;
+            case PF_Cmd_UPDATE_PARAMS_UI:
+            case PF_Cmd_USER_CHANGED_PARAM: err = UpdateParamsUI(in_data, params); break;
+            case PF_Cmd_SMART_PRE_RENDER:
+                err = PreRender(in_data, out_data, static_cast<PF_PreRenderExtra*>(extra));
+                break;
+            case PF_Cmd_SMART_RENDER:
+                err = SmartRender(in_data, out_data, static_cast<PF_SmartRenderExtra*>(extra));
+                break;
+            default: break;
+        }
+    } catch (PF_Err& thrown) {
+        err = thrown;
+    } catch (...) {
+        err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+    }
+    return err;
+}

@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configurar
+        run: cmake -S . -B build
+      - name: Compilar
+        run: cmake --build build --config Release
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TwitchRework-windows
+          path: build/Release/TwitchRework.aex
+
+  macos:
+    runs-on: macos-14  # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configurar
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Compilar
+        run: cmake --build build --config Release -j
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Verificar y firmar (ad hoc)
+        run: |
+          plugin=$(find build -name 'TwitchRework.plugin' -type d | head -n 1)
+          echo "Bundle: $plugin"
+          lipo -info "$plugin/Contents/MacOS/TwitchRework"
+          test -s "$plugin/Contents/Resources/TwitchRework.rsrc"
+          codesign --force --deep --sign - "$plugin"
+          codesign --verify --verbose "$plugin"
+          mkdir -p dist
+          ditto -c -k --keepParent "$plugin" dist/TwitchRework-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TwitchRework-macos
+          path: dist/TwitchRework-macos.zip
