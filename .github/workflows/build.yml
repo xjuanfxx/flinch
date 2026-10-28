@@ -21,6 +21,7 @@ jobs:
                sha = "4a39058fd8519444a81cfc7ae055d136f48d1a31ffa41ae255b35b2edd61e13b" }
           )
           $cuda = Join-Path $env:RUNNER_TEMP "cuda"
+          New-Item -ItemType Directory -Force $cuda | Out-Null
           foreach ($p in $parts) {
             $zip = Join-Path $env:RUNNER_TEMP (Split-Path $p.path -Leaf)
             Invoke-WebRequest "$base/$($p.path)" -OutFile $zip
