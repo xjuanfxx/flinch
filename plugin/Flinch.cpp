@@ -122,8 +122,22 @@ PF_Err add_operator_head(PF_InData* in_data, const char* name, int start) {
 PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     PF_Err err = PF_Err_NONE;
 
+    // Must follow the order of FLINCH_PARAMS in Flinch.h.
+    ERR(add_popup(in_data, "Random Pattern", 2, 1, "Modern|Twitch Compatible", P_PATTERN));
+    // GPU when After Effects renders on the GPU and the kernels load; otherwise the CPU.
+    ERR(add_popup(in_data, "Render Using", 2, RENDER_GPU_OR_CPU, "GPU (CPU fallback)|CPU Only",
+                  P_RENDER_USING));
     ERR(add_float(in_data, "Amount", 0, 10000, 0, 500, 100, P_AMOUNT));
     ERR(add_float(in_data, "Speed", 0, 10000, 0, 500, 5, P_SPEED));
+
+    ERR(begin_group(in_data, "Behaviour", P_BEHAVIOUR_START, true));
+    ERR(add_float(in_data, "Ease In", 0, 100, 0, 5, 1, P_EASE_IN));
+    ERR(add_float(in_data, "Ease Out", 0, 100, 0, 5, 1, P_EASE_OUT));
+    ERR(add_popup(in_data, "Border", 4, 1, "Mirror|Tile|Transparent|Stretch Edges", P_BORDER));
+    ERR(add_checkbox(in_data, "Show Twitch Only", false, P_SHOW_TWITCH_ONLY));
+    ERR(add_int(in_data, "Seed", 0, 999, 0, P_SEED));
+    ERR(add_float(in_data, "Randomize Minimum", 0, 100, 0, 100, 0, P_RAND_MIN));
+    ERR(end_group(in_data, P_BEHAVIOUR_END));
 
     // As in Twitch, every operator starts disabled.
     ERR(begin_group(in_data, "Enable", P_ENABLE_START, true));
@@ -134,19 +148,6 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     ERR(add_checkbox(in_data, "Slide", false, P_SLIDE_ENABLE));
     ERR(add_checkbox(in_data, "Time", false, P_TIME_ENABLE));
     ERR(end_group(in_data, P_ENABLE_END));
-
-    ERR(begin_group(in_data, "Behaviour", P_BEHAVIOUR_START));
-    ERR(add_float(in_data, "Ease In", 0, 100, 0, 5, 1, P_EASE_IN));
-    ERR(add_float(in_data, "Ease Out", 0, 100, 0, 5, 1, P_EASE_OUT));
-    ERR(add_popup(in_data, "Border", 4, 1, "Mirror|Tile|Transparent|Stretch Edges", P_BORDER));
-    ERR(add_checkbox(in_data, "Show Twitch Only", false, P_SHOW_TWITCH_ONLY));
-    ERR(add_int(in_data, "Seed", 0, 999, 0, P_SEED));
-    ERR(add_float(in_data, "Randomize Minimum", 0, 100, 0, 100, 0, P_RAND_MIN));
-    ERR(add_popup(in_data, "Random Pattern", 2, 1, "Modern|Twitch Compatible", P_PATTERN));
-    // GPU when After Effects renders on the GPU and the kernels load; otherwise the CPU.
-    ERR(add_popup(in_data, "Render Using", 2, RENDER_GPU_OR_CPU, "GPU (CPU fallback)|CPU Only",
-                  P_RENDER_USING));
-    ERR(end_group(in_data, P_BEHAVIOUR_END));
 
     ERR(begin_group(in_data, "Operator Controls", P_OPERATORS_START, true));
 
