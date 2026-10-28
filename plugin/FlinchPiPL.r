@@ -35,7 +35,7 @@ resource 'PiPL' (16000) {
 			PF_PLUG_IN_SUBVERS
 		},
 		AE_Effect_Version {
-			34817	/* PF_VERSION(0, 1, 1, PF_Stage_DEVELOP, 1) */
+			65537	/* PF_VERSION(0, 2, 0, PF_Stage_DEVELOP, 1) */
 		},
 		AE_Effect_Info_Flags {
 			0
@@ -44,9 +44,9 @@ resource 'PiPL' (16000) {
 		AE_Effect_Global_OutFlags {
 			0x06000006
 		},
-		/* GROUP_START_COLLAPSED | SMART_RENDER | FLOAT_COLOR_AWARE | THREADED_RENDERING */
+		/* GROUP_START_COLLAPSED | SMART_RENDER | FLOAT_COLOR_AWARE | THREADED_RENDERING | GPU_RENDER_F32 */
 		AE_Effect_Global_OutFlags_2 {
-			0x08001408
+			0x0A001408
 		},
 		AE_Effect_Match_Name {
 			"XJFX Flinch"

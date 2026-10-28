@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "AE_EffectGPUSuites.h"
+#include "FlinchGpuRender.h"
 #include "flinch_core.h"
 #include "flinch_render.h"
 
@@ -133,7 +135,7 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     ERR(add_checkbox(in_data, "Time", false, P_TIME_ENABLE));
     ERR(end_group(in_data, P_ENABLE_END));
 
-    ERR(begin_group(in_data, "Behaviour", P_BEHAVIOUR_START, true));
+    ERR(begin_group(in_data, "Behaviour", P_BEHAVIOUR_START));
     ERR(add_float(in_data, "Ease In", 0, 100, 0, 5, 1, P_EASE_IN));
     ERR(add_float(in_data, "Ease Out", 0, 100, 0, 5, 1, P_EASE_OUT));
     ERR(add_popup(in_data, "Border", 4, 1, "Mirror|Tile|Transparent|Stretch Edges", P_BORDER));
@@ -141,6 +143,9 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     ERR(add_int(in_data, "Seed", 0, 999, 0, P_SEED));
     ERR(add_float(in_data, "Randomize Minimum", 0, 100, 0, 100, 0, P_RAND_MIN));
     ERR(add_popup(in_data, "Random Pattern", 2, 1, "Modern|Twitch Compatible", P_PATTERN));
+    // GPU when After Effects renders on the GPU and the kernels load; otherwise the CPU.
+    ERR(add_popup(in_data, "Render Using", 2, RENDER_GPU_OR_CPU, "GPU (CPU fallback)|CPU Only",
+                  P_RENDER_USING));
     ERR(end_group(in_data, P_BEHAVIOUR_END));
 
     ERR(begin_group(in_data, "Operator Controls", P_OPERATORS_START, true));
@@ -344,6 +349,13 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
     const flinch::RandomMode mode =
         r.popup(P_PATTERN, err) == 2 ? flinch::RandomMode::Legacy : flinch::RandomMode::Stateless;
 
+    // Offer the GPU render only when AE renders on the GPU, our kernels loaded on that
+    // device (gpu_data) and the user did not pick CPU. Otherwise AE calls SmartRender.
+    const bool gpu_ready = extra->input->what_gpu != PF_GPU_Framework_NONE && extra->input->gpu_data;
+    if (gpu_ready && r.popup(P_RENDER_USING, err) == RENDER_GPU_OR_CPU) {
+        extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+    }
+
     const int64_t frame = int64_t(std::floor(double(now) / step));
     const double fps = double(in_data->time_scale) / step;
 
@@ -464,14 +476,13 @@ void clear_world(PF_EffectWorld* out) {
     for (int y = 0; y < out->height; ++y) std::memset(row_ptr<PixelT>(out, y), 0, sizeof(PixelT) * size_t(out->width));
 }
 
-template <class PixelT>
-void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& info, const PF_InData* in_data) {
+// Where output pixel (0,0) sits on the canvas. The output buffer starts at the corner
+// of the rect we returned in PreRender; if AE hands over a different size, fall back
+// to the SDK convention (-output_origin).
+flinch::Placement placement(const RenderInfo& info, const PF_EffectWorld* out, const PF_InData* in_data) {
     const PF_LRect& cv = info.canvas;
-
-    // The output buffer starts at the corner of the rect we returned in PreRender.
-    // If AE hands over a different size, fall back to the SDK convention (-output_origin).
-    flinch::Placement pl;
     const PF_LRect& o = info.out_rect;
+    flinch::Placement pl;
     if (out->width == o.right - o.left && out->height == o.bottom - o.top) {
         pl.src_x = double(o.left - cv.left);
         pl.src_y = double(o.top - cv.top);
@@ -480,6 +491,13 @@ void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& inf
         pl.src_y = double(info.src_rect.top - in_data->output_origin_y - cv.top);
     }
     pl.pixel_scale = info.pixel_scale;
+    return pl;
+}
+
+template <class PixelT>
+void render_world(PF_EffectWorld* in, PF_EffectWorld* out, const RenderInfo& info, const PF_InData* in_data) {
+    const PF_LRect& cv = info.canvas;
+    const flinch::Placement pl = placement(info, out, in_data);
 
     // Most frames have no twitch: copy directly without converting to float.
     if (!info.state.any_active()) {
@@ -531,6 +549,124 @@ PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra
     return err;
 }
 
+// ---------------------------------------------------------------------------
+// GPU
+// ---------------------------------------------------------------------------
+
+using GpuSuite = AEFX_SuiteScoper<PF_GPUDeviceSuite1>;
+
+// Loads the kernels for the device AE is about to render on. On failure no
+// gpu_data is returned and AE keeps rendering Flinch on the CPU.
+PF_Err GpuDeviceSetup(PF_InData* in_data, PF_OutData* out_data, PF_GPUDeviceSetupExtra* extra) {
+    PF_Err err = PF_Err_NONE;
+    GpuSuite gpu(in_data, kPFGPUDeviceSuite, kPFGPUDeviceSuiteVersion1, out_data);
+    PF_GPUDeviceInfo device;
+    AEFX_CLR_STRUCT(device);
+    ERR(gpu->GetDeviceInfo(in_data->effect_ref, extra->input->device_index, &device));
+    if (err) return err;
+
+    std::unique_ptr<flinch::gpu::Backend> backend;
+    switch (extra->input->what_gpu) {
+        case PF_GPU_Framework_CUDA:
+            backend = flinch::gpu::make_cuda(device.contextPV, device.command_queuePV);
+            break;
+        case PF_GPU_Framework_OPENCL:
+            backend = flinch::gpu::make_opencl(device.contextPV, device.devicePV, device.command_queuePV);
+            break;
+        case PF_GPU_Framework_METAL:
+            backend = flinch::gpu::make_metal(device.devicePV, device.command_queuePV);
+            break;
+        default: break;
+    }
+    if (backend) {
+        extra->output->gpu_data = backend.release();
+        out_data->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    }
+    return err;
+}
+
+PF_Err GpuDeviceSetdown(PF_GPUDeviceSetdownExtra* extra) {
+    delete static_cast<flinch::gpu::Backend*>(extra->input->gpu_data);
+    return PF_Err_NONE;
+}
+
+// Temporary GPU worlds for one render; disposed when the render ends.
+class AeScratch final : public flinch::gpu::Scratch {
+public:
+    AeScratch(PF_InData* in_data, const PF_GPUDeviceSuite1* suite, A_u_long device_index)
+        : in_data_(in_data), suite_(suite), device_index_(device_index) {}
+    ~AeScratch() override {
+        for (PF_EffectWorld* w : worlds_) suite_->DisposeGPUWorld(in_data_->effect_ref, w);
+    }
+
+    bool alloc(int width, int height, flinch::gpu::Buffer& out) override {
+        PF_EffectWorld* world = nullptr;
+        const PF_RationalScale square{1, 1};
+        if (suite_->CreateGPUWorld(in_data_->effect_ref, device_index_, width, height, square, in_data_->field,
+                                   PF_PixelFormat_GPU_BGRA128, false, &world) != PF_Err_NONE)
+            return false;
+        worlds_.push_back(world);
+        void* mem = nullptr;
+        if (suite_->GetGPUWorldData(in_data_->effect_ref, world, &mem) != PF_Err_NONE) return false;
+        out = {mem, width, height, int(world->rowbytes / sizeof(PF_PixelFloat))};
+        return true;
+    }
+
+private:
+    PF_InData* in_data_;
+    const PF_GPUDeviceSuite1* suite_;
+    A_u_long device_index_;
+    std::vector<PF_EffectWorld*> worlds_;
+};
+
+PF_Err SmartRenderGpu(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra) {
+    PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
+    const auto* info = static_cast<const RenderInfo*>(extra->input->pre_render_data);
+    auto* backend = static_cast<flinch::gpu::Backend*>(const_cast<void*>(extra->input->gpu_data));
+    if (!info || !backend) return PF_Err_BAD_CALLBACK_PARAM;
+
+    PF_EffectWorld *input = nullptr, *output = nullptr;
+    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kInputCheckout, &input));
+    ERR(extra->cb->checkout_output(in_data->effect_ref, &output));
+    if (!err && input && output) {
+        AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data, kPFWorldSuite, kPFWorldSuiteVersion2, out_data);
+        GpuSuite gpu(in_data, kPFGPUDeviceSuite, kPFGPUDeviceSuiteVersion1, out_data);
+        PF_PixelFormat format = PF_PixelFormat_INVALID;
+        ERR(world_suite->PF_GetPixelFormat(input, &format));
+        if (!err && format != PF_PixelFormat_GPU_BGRA128) err = PF_Err_UNRECOGNIZED_PARAM_TYPE;
+
+        void *in_mem = nullptr, *out_mem = nullptr;
+        ERR(gpu->GetGPUWorldData(in_data->effect_ref, input, &in_mem));
+        ERR(gpu->GetGPUWorldData(in_data->effect_ref, output, &out_mem));
+        if (!err) {
+            const PF_LRect& cv = info->canvas;
+            const flinch::Placement pl = placement(*info, output, in_data);
+            flinch::gpu::Layout layout;
+            layout.canvas_w = cv.right - cv.left;
+            layout.canvas_h = cv.bottom - cv.top;
+            layout.canvas_left = cv.left;
+            layout.canvas_top = cv.top;
+            layout.in_ox = info->src_rect.left - cv.left;
+            layout.in_oy = info->src_rect.top - cv.top;
+            layout.out_ox = pl.src_x;
+            layout.out_oy = pl.src_y;
+            layout.pixel_scale = info->pixel_scale;
+            layout.border = int(info->border);
+            layout.show_twitch_only = info->show_twitch_only;
+
+            const int px = int(sizeof(PF_PixelFloat));
+            const flinch::gpu::Buffer in_buf{in_mem, input->width, input->height, int(input->rowbytes / px)};
+            const flinch::gpu::Buffer out_buf{out_mem, output->width, output->height, int(output->rowbytes / px)};
+            AeScratch scratch(in_data, gpu.get(), extra->input->device_index);
+            if (!flinch::gpu::render(*backend, scratch, info->state, layout, in_buf, out_buf)) {
+                err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+            }
+        }
+    }
+    ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, kInputCheckout));
+    return err;
+}
+
 }  // namespace
 
 extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
@@ -559,6 +695,15 @@ PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data, PF_Param
                 break;
             case PF_Cmd_SMART_RENDER:
                 err = SmartRender(in_data, out_data, static_cast<PF_SmartRenderExtra*>(extra));
+                break;
+            case PF_Cmd_SMART_RENDER_GPU:
+                err = SmartRenderGpu(in_data, out_data, static_cast<PF_SmartRenderExtra*>(extra));
+                break;
+            case PF_Cmd_GPU_DEVICE_SETUP:
+                err = GpuDeviceSetup(in_data, out_data, static_cast<PF_GPUDeviceSetupExtra*>(extra));
+                break;
+            case PF_Cmd_GPU_DEVICE_SETDOWN:
+                err = GpuDeviceSetdown(static_cast<PF_GPUDeviceSetdownExtra*>(extra));
                 break;
             default: break;
         }

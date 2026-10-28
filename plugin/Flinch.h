@@ -22,8 +22,8 @@
 #define FLINCH_SUPPORT_URL "https://github.com/"
 
 #define FLINCH_MAJOR_VERSION 0
-#define FLINCH_MINOR_VERSION 1
-#define FLINCH_BUG_VERSION 1
+#define FLINCH_MINOR_VERSION 2
+#define FLINCH_BUG_VERSION 0
 
 // Must match AE_Effect_Global_OutFlags(_2) in FlinchPiPL.r.
 #define FLINCH_OUT_FLAGS                                                                              \
@@ -31,7 +31,8 @@
      PF_OutFlag_SEND_UPDATE_PARAMS_UI)
 #define FLINCH_OUT_FLAGS2                                                                             \
     (PF_OutFlag2_PARAM_GROUP_START_COLLAPSED_FLAG | PF_OutFlag2_SUPPORTS_SMART_RENDER |             \
-     PF_OutFlag2_FLOAT_COLOR_AWARE | PF_OutFlag2_SUPPORTS_THREADED_RENDERING)
+     PF_OutFlag2_FLOAT_COLOR_AWARE | PF_OutFlag2_SUPPORTS_THREADED_RENDERING |                      \
+     PF_OutFlag2_SUPPORTS_GPU_RENDER_F32)
 
 // Parameter indices, in the order they are added in ParamsSetup.
 // The layout follows Twitch: Enable / Behaviour / Operator Controls.
@@ -57,6 +58,7 @@ enum {
     P_SEED,
     P_RAND_MIN,
     P_PATTERN,
+    P_RENDER_USING,
     P_BEHAVIOUR_END,
 
     P_OPERATORS_START,
@@ -118,9 +120,18 @@ enum {
     P_NUM_PARAMS
 };
 
+// "Render Using" choices.
+enum { RENDER_GPU_OR_CPU = 1, RENDER_CPU = 2 };
+
 // Disk IDs identify each parameter in saved projects.
-// Never change or reuse them once released.
-inline A_long disk_id(int param_index) { return param_index; }
+// Never change or reuse them once released. Up to 0.1.x the ID was the index;
+// parameters added later get their own IDs so older projects keep loading.
+constexpr A_long kRenderUsingDiskId = 1000;
+inline A_long disk_id(int param_index) {
+    if (param_index < P_RENDER_USING) return param_index;
+    if (param_index == P_RENDER_USING) return kRenderUsingDiskId;
+    return param_index - 1;
+}
 
 extern "C" {
 DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data,

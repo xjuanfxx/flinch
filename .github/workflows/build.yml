@@ -10,6 +10,27 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install CUDA compiler (nvcc 12.8, for the PTX kernels)
+        shell: pwsh
+        run: |
+          $base = "https://developer.download.nvidia.com/compute/cuda/redist"
+          $parts = @(
+            @{ path = "cuda_nvcc/windows-x86_64/cuda_nvcc-windows-x86_64-12.8.93-archive.zip";
+               sha = "9fdc70b4271ed9aad4d64cd7076a7d96ec36512d074b9995fe638de669197391" },
+            @{ path = "cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-12.8.90-archive.zip";
+               sha = "4a39058fd8519444a81cfc7ae055d136f48d1a31ffa41ae255b35b2edd61e13b" }
+          )
+          $cuda = Join-Path $env:RUNNER_TEMP "cuda"
+          foreach ($p in $parts) {
+            $zip = Join-Path $env:RUNNER_TEMP (Split-Path $p.path -Leaf)
+            Invoke-WebRequest "$base/$($p.path)" -OutFile $zip
+            if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $p.sha) { throw "Checksum mismatch: $zip" }
+            $tmp = Join-Path $env:RUNNER_TEMP "x"
+            Expand-Archive $zip -DestinationPath $tmp -Force
+            Get-ChildItem $tmp -Directory | ForEach-Object { Copy-Item "$($_.FullName)\*" $cuda -Recurse -Force }
+            Remove-Item $tmp -Recurse -Force
+          }
+          "CUDA_PATH=$cuda" >> $env:GITHUB_ENV
       - name: Configure
         run: cmake -S . -B build
       - name: Build
@@ -31,6 +52,16 @@ jobs:
         run: cmake --build build --config Release -j
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Validate Metal kernels
+        run: |
+          src="$RUNNER_TEMP/flinch_kernels.metal"
+          cat plugin/gpu/prelude_metal.metal plugin/gpu/flinch_gpu_types.h plugin/gpu/flinch_kernels.inc > "$src"
+          if xcrun -sdk macosx -f metal > /dev/null 2>&1; then
+            xcrun -sdk macosx metal -c "$src" -o "$RUNNER_TEMP/flinch_kernels.air"
+            echo "Metal kernels compile"
+          else
+            echo "::warning::Metal compiler not available on this runner; kernels not validated"
+          fi
       - name: Verify and sign (ad hoc)
         run: |
           plugin=$(find build -name 'Flinch.plugin' -type d | head -n 1)

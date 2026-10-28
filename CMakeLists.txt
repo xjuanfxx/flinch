@@ -32,6 +32,77 @@ add_executable(test_render tests/test_render.cpp)
 target_link_libraries(test_render PRIVATE flinch_core)
 add_test(NAME render COMMAND test_render)
 
+# --- GPU kernels and backends ------------------------------------------------
+# One kernel source (plugin/gpu/flinch_kernels.inc) feeds three backends:
+# OpenCL and Metal compile it at runtime from embedded text; CUDA embeds PTX
+# built here with nvcc (optional: without nvcc, CUDA projects render on the CPU).
+set(gpu_dir "${CMAKE_CURRENT_SOURCE_DIR}/plugin/gpu")
+set(gpu_gen "${CMAKE_CURRENT_BINARY_DIR}/gpu")
+file(MAKE_DIRECTORY "${gpu_gen}")
+set(kernel_inputs "${gpu_dir}/flinch_gpu_types.h" "${gpu_dir}/flinch_kernels.inc")
+
+function(flinch_embed output name)
+  list(JOIN ARGN "|" files)
+  add_custom_command(
+    OUTPUT "${output}"
+    COMMAND "${CMAKE_COMMAND}" "-DOUTPUT=${output}" "-DNAME=${name}" "-DFILES=${files}"
+            -P "${gpu_dir}/embed.cmake"
+    DEPENDS ${ARGN} "${gpu_dir}/embed.cmake"
+    COMMENT "Embedding ${name}"
+    VERBATIM)
+endfunction()
+
+set(gpu_sources "${gpu_dir}/FlinchGpuCuda.cpp" "${gpu_dir}/FlinchGpuOpenCL.cpp")
+set(gpu_defs "")
+if(WIN32)
+  flinch_embed("${gpu_gen}/flinch_kernels_opencl.h" kFlinchOpenCLSource
+               "${gpu_dir}/prelude_opencl.cl" ${kernel_inputs})
+  list(APPEND gpu_sources "${gpu_gen}/flinch_kernels_opencl.h" "${gpu_dir}/FlinchGpuMetalStub.cpp")
+
+  find_program(FLINCH_NVCC nvcc
+               HINTS "$ENV{CUDA_PATH}/bin" "$ENV{USERPROFILE}/Tools/cuda-12.8/bin")
+  if(FLINCH_NVCC)
+    get_filename_component(host_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    add_custom_command(
+      OUTPUT "${gpu_gen}/flinch_kernels.ptx"
+      COMMAND "${FLINCH_NVCC}" -ptx -arch=compute_50 -Wno-deprecated-gpu-targets
+              -allow-unsupported-compiler -ccbin "${host_cl_dir}" -I "${gpu_dir}"
+              "${gpu_dir}/flinch_kernels.cu" -o "${gpu_gen}/flinch_kernels.ptx"
+      DEPENDS "${gpu_dir}/flinch_kernels.cu" ${kernel_inputs}
+      COMMENT "Compiling CUDA kernels to PTX"
+      VERBATIM)
+    flinch_embed("${gpu_gen}/flinch_kernels_ptx.h" kFlinchPtx "${gpu_gen}/flinch_kernels.ptx")
+    list(APPEND gpu_sources "${gpu_gen}/flinch_kernels_ptx.h")
+    list(APPEND gpu_defs FLINCH_HAS_CUDA)
+    message(STATUS "CUDA kernels: ${FLINCH_NVCC}")
+  else()
+    message(STATUS "nvcc not found: CUDA projects will render Flinch on the CPU")
+  endif()
+elseif(APPLE)
+  enable_language(OBJCXX)
+  flinch_embed("${gpu_gen}/flinch_kernels_metal.h" kFlinchMetalSource
+               "${gpu_dir}/prelude_metal.metal" ${kernel_inputs})
+  list(APPEND gpu_sources "${gpu_dir}/FlinchGpuMetal.mm" "${gpu_gen}/flinch_kernels_metal.h")
+  set_source_files_properties("${gpu_dir}/FlinchGpuMetal.mm" PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+endif()
+
+add_library(flinch_gpu STATIC ${gpu_sources})
+target_include_directories(flinch_gpu PUBLIC "${gpu_dir}" "${gpu_gen}")
+target_compile_definitions(flinch_gpu PRIVATE ${gpu_defs})
+target_link_libraries(flinch_gpu PUBLIC flinch_core)
+if(WIN32)
+  target_compile_definitions(flinch_gpu PUBLIC NOMINMAX PRIVATE WIN32_LEAN_AND_MEAN)
+elseif(APPLE)
+  target_link_libraries(flinch_gpu PUBLIC "-framework Metal" "-framework Foundation")
+endif()
+
+# Runs the GPU kernels on this machine (CUDA and OpenCL) and compares them with
+# the CPU renderer. Windows only; not part of ctest because CI has no GPU.
+if(WIN32)
+  add_executable(gpu_check tools/gpu_check.cpp)
+  target_link_libraries(gpu_check PRIVATE flinch_gpu)
+endif()
+
 # --- After Effects plugin --------------------------------------------------
 set(AE_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ae_sdk"
     CACHE PATH "Folder with the After Effects SDK Headers/, Util/ and Resources/")
@@ -98,4 +169,4 @@ endif()
 target_include_directories(Flinch PRIVATE
   "${AE_SDK_DIR}/Headers" "${AE_SDK_DIR}/Headers/SP"
   "${AE_SDK_DIR}/Resources" "${AE_SDK_DIR}/Util")
-target_link_libraries(Flinch PRIVATE flinch_core)
+target_link_libraries(Flinch PRIVATE flinch_gpu)

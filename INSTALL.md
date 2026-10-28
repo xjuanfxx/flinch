@@ -38,6 +38,14 @@ does step 3 for you.
 
 Delete the `Flinch` folder inside the After Effects `Plug-ins` folder.
 
+## GPU or CPU
+
+Flinch renders on the GPU when the project does (*File › Project Settings ›
+Video Rendering and Effects*: Mercury GPU Acceleration with CUDA, OpenCL or
+Metal). Set **Behaviour › Render Using** to **CPU Only** to force the CPU. With
+"Mercury Software Only", or if the GPU kernels cannot load, Flinch uses the CPU
+automatically.
+
 ## Compatibility
 
 | | Status |

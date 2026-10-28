@@ -17,6 +17,10 @@ on their own and fade in and out over a few frames.
   renders are repeatable.
 - Motion blur for Slide and Scale with constant cost per pixel, regardless of
   how far the content moves.
+- GPU rendering through the framework After Effects uses: **CUDA** (NVIDIA)
+  or **OpenCL** (AMD/Intel) on Windows, **Metal** on macOS. *Behaviour › Render
+  Using* chooses **GPU (CPU fallback)** or **CPU Only**; when the project renders
+  on the CPU, or the GPU kernels cannot load, Flinch falls back to the CPU.
 - 8, 16 and 32-bit (float) color, SmartFX, multi-frame rendering.
 - Windows (x64) and macOS (universal: Apple Silicon + Intel).
 
@@ -27,8 +31,9 @@ on their own and fade in and out over a few frames.
 | `core/include/flinch_core.h` | Timing and randomness: when each twitch fires and how strong it is. No After Effects dependency. |
 | `core/include/flinch_render.h` | Pixel processing (zoom, slide, blur, light, color) on float images. No After Effects dependency. |
 | `plugin/` | The After Effects adapter: parameters, PiPL resource, SmartFX pre-render/render. |
+| `plugin/gpu/` | GPU kernels written once (`flinch_kernels.inc`) plus the CUDA, OpenCL and Metal backends. |
 | `tests/` | Unit tests for the core and the renderer. |
-| `tools/` | `flinch_curves` (dump per-frame state as CSV), `plot_curves.py` (plot it as SVG), `bench_render` (performance). |
+| `tools/` | `flinch_curves` (dump per-frame state as CSV), `plot_curves.py` (plot it as SVG), `bench_render` (performance), `gpu_check` (run the GPU kernels and compare them with the CPU, Windows). |
 | `analysis/` | Behaviour notes used as the reference for the implementation. |
 | `third_party/ae_sdk/` | The parts of the Adobe After Effects SDK needed to build (see [Disclaimer](#disclaimer)). |
 | `scripts/` | Install scripts for Windows and macOS. |
@@ -48,6 +53,19 @@ Output:
 
 - Windows: `build/Release/Flinch.aex`
 - macOS: `build/Flinch.plugin` (universal binary)
+
+**CUDA kernels (Windows).** They are compiled to PTX with `nvcc` from CUDA 12.8.
+CMake looks for it in `CUDA_PATH` or `%USERPROFILE%\Tools\cuda-12.8`; the
+standalone `cuda_nvcc` and `cuda_cudart` archives from NVIDIA's redistributables
+are enough, no full toolkit install. Without `nvcc` the build still succeeds and
+CUDA projects render Flinch on the CPU. OpenCL and Metal kernels need no extra
+tools: they are compiled by the driver at runtime.
+
+To check the GPU kernels on a Windows machine without After Effects:
+
+```sh
+build/Release/gpu_check
+```
 
 Every push is also built and tested on GitHub Actions for both platforms; the
 plugins can be downloaded from the run's artifacts.
