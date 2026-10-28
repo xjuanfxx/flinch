@@ -1,4 +1,4 @@
-// Core tests: they check the properties stated in the spec, not magic values.
+// Core tests: they check the properties stated in docs/behaviour.md, not magic values.
 #include <cmath>
 #include <cstdio>
 

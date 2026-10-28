@@ -3,11 +3,15 @@ build/
 out/
 dist/
 
+# Adobe After Effects SDK: not redistributable, each developer provides it
+# (see "Building" in README.md)
+third_party/ae_sdk/
+
 # Twitch binaries (Video Copilot): not ours, never committed
 twitch.aex
 twitch.plugin/
 *.aex
 *.plugin/
 
-# Analysis artifacts
-analysis/*.snapshot
+# Local analysis notes and artifacts
+analysis/

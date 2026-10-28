@@ -1,6 +1,6 @@
 // flinch_core.h — timing and randomness core of Flinch.
 //
-// New implementation written from analysis/twitch-operators-spec.md.
+// Behaviour reference: docs/behaviour.md.
 // Independent of After Effects: takes parameters and a frame number and
 // returns the state of every operator. Rendering (blur, displacement, etc.)
 // lives elsewhere and only consumes FrameState.
@@ -46,7 +46,7 @@ inline double random01(int64_t slot, uint32_t key, RandomMode mode) {
     return double(z >> 11) * (1.0 / 9007199254740991.0);  // 53 bits → [0,1]
 }
 
-// Offset of each random stream (spec §3).
+// Offset of each random stream (docs/behaviour.md §3).
 namespace stream {
 constexpr uint32_t kEvents = 0;
 constexpr uint32_t kSlideSign = 8000;
@@ -63,7 +63,7 @@ constexpr uint32_t kScaleOrigin = 26000;  // +0 X, +1000 Y
 }  // namespace stream
 
 // ---------------------------------------------------------------------------
-// Event scheduling and envelope (spec §3–§5)
+// Event scheduling and envelope (docs/behaviour.md §3–§5)
 // ---------------------------------------------------------------------------
 
 // Frames per slot; 0 if the operator never fires.

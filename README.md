@@ -59,18 +59,20 @@ Current version: **0.2.0**. Details in [INSTALL.md](INSTALL.md#compatibility).
 | `plugin/gpu/` | GPU kernels written once (`flinch_kernels.inc`) plus the CUDA, OpenCL and Metal backends. |
 | `tests/` | Unit tests for the core and the renderer. |
 | `tools/` | `flinch_curves` (dump per-frame state as CSV), `plot_curves.py` (plot it as SVG), `bench_render` (performance), `gpu_check` (run the GPU kernels and compare them with the CPU, Windows). |
-| `analysis/` | Behaviour notes used as the reference for the implementation. |
-| `third_party/ae_sdk/` | The parts of the Adobe After Effects SDK needed to build (see [Disclaimer](#disclaimer)). |
+| `docs/behaviour.md` | How the effect behaves: timing, randomness and each operator. |
 | `scripts/` | Install scripts for Windows and macOS. |
 | `docs/brand/` | Logo and banner: `flinch-icon.svg` (source), PNG icons at 256 and 1024 px, and `flinch-banner.png`. |
 
 ## Building
 
-Requirements: CMake 3.20+ and a C++17 compiler
-(Visual Studio 2022 on Windows, Xcode command line tools on macOS).
+Requirements: CMake 3.20+, a C++17 compiler (Visual Studio 2022 on Windows,
+Xcode command line tools on macOS) and the
+[Adobe After Effects SDK](https://developer.adobe.com/after-effects/), which is
+not included in this repository: download it from Adobe and point CMake to its
+`Examples` folder (the one with `Headers/`, `Util/` and `Resources/`):
 
 ```sh
-cmake -S . -B build
+cmake -S . -B build -DAE_SDK_DIR=/path/to/AfterEffectsSDK/Examples
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
@@ -92,6 +94,10 @@ To check the GPU kernels on a Windows machine without After Effects:
 ```sh
 build/Release/gpu_check
 ```
+
+The `AE_SDK_DIR` environment variable, or a copy of those three folders in
+`third_party/ae_sdk/` (ignored by git), work too. Without the SDK, CMake still
+builds and tests the core and the tools, and skips the plugin.
 
 Every push is also built and tested on GitHub Actions for both platforms; the
 plugins can be downloaded from the run's artifacts.
@@ -125,14 +131,11 @@ Then restart After Effects and apply **Effect › Flinch › Flinch**.
 - **No affiliation.** *Twitch* is a product of Video Copilot. *After Effects*
   is a trademark of Adobe. Flinch is not affiliated with or endorsed by either
   company.
-- **No third-party code.** Flinch does not contain code, assets or binaries
-  from Video Copilot's Twitch. The behaviour notes in `analysis/` describe how
-  the original effect *behaves* (timing, ranges, formulas); the implementation
-  was written from those notes, not copied from the original. The original
-  plugin binaries are never committed to this repository.
-- **Adobe SDK.** `third_party/ae_sdk/` contains files from the Adobe After
-  Effects SDK, which remain under Adobe's license terms. They are included only
-  so the project can be built; if this repository is ever made public, they
-  must be removed and fetched separately by each developer.
+- **Independent implementation.** Flinch does not contain code, assets or
+  binaries from Video Copilot's Twitch. Its behaviour (timing, ranges,
+  formulas) is described in `docs/behaviour.md`, and the implementation was
+  written from that description.
+- **Adobe SDK.** The After Effects SDK is not part of this repository; each
+  developer downloads it from Adobe under Adobe's license terms.
 - **Use responsibly.** If you own a licence for the original plugin, respect
   its terms. Do not use this project to circumvent anyone's licensing.

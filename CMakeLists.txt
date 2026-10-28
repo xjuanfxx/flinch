@@ -104,7 +104,15 @@ if(WIN32)
 endif()
 
 # --- After Effects plugin --------------------------------------------------
-set(AE_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ae_sdk"
+# The Adobe SDK is not redistributable, so it is not in the repository: pass
+# -DAE_SDK_DIR=<sdk>/Examples, set the AE_SDK_DIR environment variable, or copy
+# Headers/, Util/ and Resources/ into third_party/ae_sdk (ignored by git).
+if(DEFINED ENV{AE_SDK_DIR})
+  set(ae_sdk_default "$ENV{AE_SDK_DIR}")
+else()
+  set(ae_sdk_default "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ae_sdk")
+endif()
+set(AE_SDK_DIR "${ae_sdk_default}"
     CACHE PATH "Folder with the After Effects SDK Headers/, Util/ and Resources/")
 
 if(NOT EXISTS "${AE_SDK_DIR}/Headers/AE_Effect.h")

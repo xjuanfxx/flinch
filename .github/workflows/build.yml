@@ -5,6 +5,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The Adobe SDK is not redistributable, so it lives in a private repository
+# (xjuanfxx/ae-sdk: Headers/, Util/, Resources/) read with a deploy key stored as
+# the AE_SDK_DEPLOY_KEY secret. Without the secret (forks) only the core and its
+# tests are built.
+env:
+  HAS_SDK: ${{ secrets.AE_SDK_DEPLOY_KEY != '' }}
+
 jobs:
   windows:
     # VS 2022: the VS 2026 STL requires CUDA 13.2+, and Flinch's kernels use CUDA 12.8
@@ -12,6 +19,13 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch After Effects SDK
+        if: env.HAS_SDK == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: xjuanfxx/ae-sdk
+          ssh-key: ${{ secrets.AE_SDK_DEPLOY_KEY }}
+          path: third_party/ae_sdk
       - name: Install CUDA compiler (nvcc 12.8, for the PTX kernels)
         shell: pwsh
         run: |
@@ -41,6 +55,7 @@ jobs:
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
       - uses: actions/upload-artifact@v4
+        if: env.HAS_SDK == 'true'
         with:
           name: Flinch-windows
           path: build/Release/Flinch.aex
@@ -49,6 +64,13 @@ jobs:
     runs-on: macos-14  # Apple Silicon
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch After Effects SDK
+        if: env.HAS_SDK == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: xjuanfxx/ae-sdk
+          ssh-key: ${{ secrets.AE_SDK_DEPLOY_KEY }}
+          path: third_party/ae_sdk
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
@@ -66,6 +88,7 @@ jobs:
             echo "::warning::Metal compiler not available on this runner; kernels not validated"
           fi
       - name: Verify and sign (ad hoc)
+        if: env.HAS_SDK == 'true'
         run: |
           plugin=$(find build -name 'Flinch.plugin' -type d | head -n 1)
           echo "Bundle: $plugin"
@@ -76,6 +99,7 @@ jobs:
           mkdir -p dist
           ditto -c -k --keepParent "$plugin" dist/Flinch-macos.zip
       - uses: actions/upload-artifact@v4
+        if: env.HAS_SDK == 'true'
         with:
           name: Flinch-macos
           path: dist/Flinch-macos.zip
