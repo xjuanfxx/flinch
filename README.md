@@ -1,4 +1,12 @@
-# Flinch
+<p align="center">
+  <img src="docs/brand/flinch-banner.png" alt="Flinch — random jolts for After Effects" width="100%">
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><b>Download the latest release</b></a> ·
+  <a href="INSTALL.md">Install guide</a> ·
+  <a href="#building">Build from source</a>
+</p>
 
 Flinch is an After Effects effect that adds short, random, involuntary-looking
 jolts to a layer: blur, color, light, scale, slide and time "twitches" that fire
@@ -11,18 +19,35 @@ on their own and fade in and out over a few frames.
 
 ## Features
 
-- Six operators, each with its own amount, rate and seed:
+- Six operators, switched on individually under **Enable**:
   **Blur**, **Color**, **Light**, **Scale**, **Slide** (with RGB split) and **Time**.
+  Each has its own controls under **Operator Controls** (tint, colorize, light
+  behaviour, scale origin, slide direction and spread, time direction…) and its
+  own unique seed.
+- Global **Amount** and **Speed**, plus a **Behaviour** group: Ease In/Out,
+  Border mode (Mirror, Tile, Transparent, Stretch Edges), Show Twitch Only,
+  Seed and Randomize Minimum.
 - Deterministic randomness: the same seed always gives the same result, so
-  renders are repeatable.
+  renders are repeatable. **Random Pattern** picks *Modern* (a fast stateless
+  hash, the default) or *Twitch Compatible* (for side-by-side comparisons).
 - Motion blur for Slide and Scale with constant cost per pixel, regardless of
   how far the content moves.
 - GPU rendering through the framework After Effects uses: **CUDA** (NVIDIA)
-  or **OpenCL** (AMD/Intel) on Windows, **Metal** on macOS. *Behaviour › Render
-  Using* chooses **GPU (CPU fallback)** or **CPU Only**; when the project renders
-  on the CPU, or the GPU kernels cannot load, Flinch falls back to the CPU.
+  or **OpenCL** (AMD/Intel) on Windows, **Metal** on macOS. **Render Using**
+  chooses **GPU (CPU fallback)** or **CPU Only**; when the project renders on
+  the CPU, or the GPU kernels cannot load, Flinch falls back to the CPU.
 - 8, 16 and 32-bit (float) color, SmartFX, multi-frame rendering.
 - Windows (x64) and macOS (universal: Apple Silicon + Intel).
+
+## Compatibility
+
+| Platform | Status |
+|---|---|
+| After Effects 2026, Windows x64 | Tested |
+| After Effects 2022–2025, Windows x64 | Expected to work, not tested |
+| After Effects 2022+, macOS (Apple Silicon / Intel) | Builds and passes tests in CI; not tested inside After Effects yet |
+
+Current version: **0.2.0**. Details in [INSTALL.md](INSTALL.md#compatibility).
 
 ## Project layout
 
@@ -37,6 +62,7 @@ on their own and fade in and out over a few frames.
 | `analysis/` | Behaviour notes used as the reference for the implementation. |
 | `third_party/ae_sdk/` | The parts of the Adobe After Effects SDK needed to build (see [Disclaimer](#disclaimer)). |
 | `scripts/` | Install scripts for Windows and macOS. |
+| `docs/brand/` | Logo and banner: `flinch-icon.svg` (source), PNG icons at 256 and 1024 px, and `flinch-banner.png`. |
 
 ## Building
 
