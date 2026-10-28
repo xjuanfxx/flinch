@@ -7,7 +7,9 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # VS 2022: the VS 2026 STL requires CUDA 13.2+, and Flinch's kernels use CUDA 12.8
+    # (the last CUDA that still targets GTX 10-series GPUs).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Install CUDA compiler (nvcc 12.8, for the PTX kernels)
