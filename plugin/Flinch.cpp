@@ -320,12 +320,9 @@ flinch::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, 
 PF_Err About(PF_InData* in_data, PF_OutData* out_data) {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
     suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
-                                          "%s %d.%d.%d\r\r"
-                                          "Random jolts for your layers:\r"
-                                          "blur, color, light, scale, slide and time.\r\r"
-                                          "GPU: CUDA, OpenCL, Metal (CPU fallback).\r\r"
-                                          "by xJuanFX - an educational project,\r"
-                                          "not affiliated with Video Copilot.",
+                                          "%s %d.%d.%d\r"
+                                          "Random jolts for your layers.\r\r"
+                                          "by xJuanFX",
                                           FLINCH_NAME, FLINCH_MAJOR_VERSION, FLINCH_MINOR_VERSION,
                                           FLINCH_BUG_VERSION);
     return PF_Err_NONE;
