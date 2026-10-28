@@ -54,6 +54,10 @@ plugins can be downloaded from the run's artifacts.
 
 ## Installing
 
+Prebuilt plugins are attached to each [release](../../releases); the
+step-by-step guide (including manual install and compatibility) is in
+[INSTALL.md](INSTALL.md). From a source build:
+
 **Windows** (asks for administrator rights, since the plug-ins folder is in
 Program Files):
 
