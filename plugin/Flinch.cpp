@@ -4,7 +4,6 @@
 // All operator logic lives in core/include.
 #include "Flinch.h"
 
-#include <climits>
 #include <cstring>
 #include <cstdio>
 #include <memory>
@@ -351,9 +350,14 @@ PF_Err PreRender(PF_InData* in_data, PF_OutData* /*out_data*/, PF_PreRenderExtra
     // Time does not depend on the layer size: decide first which frame to request.
     const flinch::TimeState time = flinch::evaluate(p_now, p_prev, frame, fps, 1, 1, mode).time;
 
-    // Request the whole layer: Slide/Scale can reveal any area.
+    // Request the whole layer (Slide/Scale can reveal any area) plus whatever AE asked
+    // us to render. Keep it bounded: effects that expand the buffer (e.g. a shake
+    // before us) can return an empty buffer for an unbounded request.
+    const double ds_y = double(in_data->downsample_y.num) / in_data->downsample_y.den;
+    const PF_LRect layer_rect{0, 0, A_long(std::ceil(in_data->width * ds_x)),
+                              A_long(std::ceil(in_data->height * ds_y))};
     PF_RenderRequest req = extra->input->output_request;
-    req.rect = {-INT_MAX / 4, -INT_MAX / 4, INT_MAX / 4, INT_MAX / 4};
+    req.rect = union_rect(layer_rect, extra->input->output_request.rect);
     req.preserve_rgb_of_zero_alpha = TRUE;
     req.field = PF_Field_FRAME;
     PF_CheckoutResult in_result;
