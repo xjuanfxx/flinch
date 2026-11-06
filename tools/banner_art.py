@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ICON = os.path.join(ROOT, "docs", "brand", "flinch-icon-256.png")
+ICON = os.path.join(ROOT, "docs", "brand", "flinch-icon-1024.png")
 STILL = os.path.join(ROOT, "docs", "brand", "flinch-banner.png")
 SIZE = (2400, 1024)
 
@@ -57,6 +57,16 @@ def spaced(draw, xy, text, fnt, fill, tracking, anchor="l"):
         draw.text((x, xy[1]), c, font=fnt, fill=fill, anchor="ls")
         x += w + tracking
     return total
+
+
+def icon(size):
+    """The app icon, cut to its rounded tile: the PNG has opaque white corners."""
+    img = Image.open(ICON).convert("RGBA")
+    s = img.width / 512  # flinch-icon.svg: tile at 16,16, 480 wide, corner radius 112
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([16 * s, 16 * s, 496 * s - 1, 496 * s - 1], radius=112 * s, fill=255)
+    img.putalpha(mask)
+    return img.crop((round(16 * s), round(16 * s), round(496 * s), round(496 * s))).resize((size, size), Image.LANCZOS)
 
 
 def background():
@@ -159,8 +169,7 @@ def still():
         d.line([(x, y + sy * arm), (x, y), (x + sx * arm, y)], fill=c, width=3)
 
     top, bottom = INSET + 66, h - INSET - 26
-    icon = Image.open(ICON).convert("RGBA").resize((64, 64), Image.LANCZOS)
-    layer.alpha_composite(icon, (INSET + 34, top - 46))
+    layer.alpha_composite(icon(64), (INSET + 34, top - 46))
     x = INSET + 34 + 64 + 22
     x += spaced(d, (x, top), "FLINCH", mono_b, CREAM, 6)
     spaced(d, (x + 22, top), "/  AFTER EFFECTS PLUG-IN", mono, MUTED, 6)
