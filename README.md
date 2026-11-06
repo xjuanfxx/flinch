@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/brand/flinch-banner.png" alt="Flinch — random jolts for After Effects" width="100%">
+  <img src="docs/brand/flinch-banner.webp" alt="Flinch — random jolts for After Effects" width="100%">
 </p>
 
 <p align="center">
@@ -58,10 +58,10 @@ Current version: **0.2.0**. Details in [INSTALL.md](INSTALL.md#compatibility).
 | `plugin/` | The After Effects adapter: parameters, PiPL resource, SmartFX pre-render/render. |
 | `plugin/gpu/` | GPU kernels written once (`flinch_kernels.inc`) plus the CUDA, OpenCL and Metal backends. |
 | `tests/` | Unit tests for the core and the renderer. |
-| `tools/` | `flinch_curves` (dump per-frame state as CSV), `plot_curves.py` (plot it as SVG), `bench_render` (performance), `gpu_check` (run the GPU kernels and compare them with the CPU, Windows). |
+| `tools/` | `flinch_curves` (dump per-frame state as CSV), `plot_curves.py` (plot it as SVG), `bench_render` (performance), `gpu_check` (run the GPU kernels and compare them with the CPU, Windows), `render_frames` + `make_banner.py` (render Flinch over a still image; makes the animated banner). |
 | `docs/behaviour.md` | How the effect behaves: timing, randomness and each operator. |
 | `scripts/` | Install scripts for Windows and macOS. |
-| `docs/brand/` | Logo and banner: `flinch-icon.svg` (source), PNG icons at 256 and 1024 px, and `flinch-banner.png`. |
+| `docs/brand/` | Logo and banner: `flinch-icon.svg` (source), PNG icons at 256 and 1024 px, `flinch-banner.png` (still) and `flinch-banner.webp` (animated, rendered with Flinch itself). |
 
 ## Building
 

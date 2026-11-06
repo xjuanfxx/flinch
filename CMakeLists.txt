@@ -23,6 +23,12 @@ target_link_libraries(flinch_curves PRIVATE flinch_core)
 add_executable(bench_render tools/bench_render.cpp)
 target_link_libraries(bench_render PRIVATE flinch_core)
 
+add_executable(render_frames tools/render_frames.cpp)
+target_link_libraries(render_frames PRIVATE flinch_core)
+if(MSVC)
+  target_compile_definitions(render_frames PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 enable_testing()
 add_executable(test_core tests/test_core.cpp)
 target_link_libraries(test_core PRIVATE flinch_core)
