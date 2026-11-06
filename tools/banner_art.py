@@ -60,12 +60,9 @@ def spaced(draw, xy, text, fnt, fill, tracking, anchor="l"):
 
 
 def icon(size):
-    """The app icon, cut to its rounded tile: the PNG has opaque white corners."""
+    """The app icon, cropped to its rounded tile."""
     img = Image.open(ICON).convert("RGBA")
-    s = img.width / 512  # flinch-icon.svg: tile at 16,16, 480 wide, corner radius 112
-    mask = Image.new("L", img.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle([16 * s, 16 * s, 496 * s - 1, 496 * s - 1], radius=112 * s, fill=255)
-    img.putalpha(mask)
+    s = img.width / 512  # flinch-icon.svg: the tile is at 16,16 and 480 wide
     return img.crop((round(16 * s), round(16 * s), round(496 * s), round(496 * s))).resize((size, size), Image.LANCZOS)
 
 
