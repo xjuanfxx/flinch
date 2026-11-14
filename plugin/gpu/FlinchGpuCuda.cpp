@@ -111,12 +111,18 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Backend> make_cuda(void* context, void* stream) {
+std::unique_ptr<Backend> make_cuda(void* context, void* stream, std::string& error) {
     static DriverApi api;
     static const bool loaded = api.load();
-    if (!loaded || !context) return nullptr;
+    if (!loaded || !context) {
+        error = loaded ? "no CUDA context" : "CUDA driver not found";
+        return nullptr;
+    }
     auto backend = std::make_unique<CudaBackend>(api, context, stream);
-    if (!backend->init()) return nullptr;
+    if (!backend->init()) {
+        error = "CUDA kernels failed to load";
+        return nullptr;
+    }
     return backend;
 }
 
@@ -125,7 +131,10 @@ std::unique_ptr<Backend> make_cuda(void* context, void* stream) {
 #else
 
 namespace flinch::gpu {
-std::unique_ptr<Backend> make_cuda(void*, void*) { return nullptr; }
+std::unique_ptr<Backend> make_cuda(void*, void*, std::string& error) {
+    error = "built without CUDA kernels";
+    return nullptr;
+}
 }  // namespace flinch::gpu
 
 #endif

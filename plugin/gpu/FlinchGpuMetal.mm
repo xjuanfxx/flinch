@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <string>
 
 #include "flinch_kernels_metal.h"  // generated: kFlinchMetalSource
 
@@ -18,15 +19,23 @@ class MetalBackend final : public Backend {
 public:
     MetalBackend(id<MTLDevice> device, id<MTLCommandQueue> queue) : device_(device), queue_(queue) {}
 
-    bool init() {
+    bool init(std::string& message) {
         @autoreleasepool {
             NSError* error = nil;
             NSString* source = [NSString stringWithUTF8String:kFlinchMetalSource];
             id<MTLLibrary> library = [device_ newLibraryWithSource:source options:nil error:&error];
-            if (!library) return false;
+            if (!library) {
+                message = "Metal kernels failed to compile";
+                if (error) {
+                    NSLog(@"Flinch: %@", error.localizedDescription);
+                    message += ": " + std::string(error.localizedDescription.UTF8String);
+                }
+                return false;
+            }
             geometry_ = pipeline(library, @"flinch_geometry");
             blur_ = pipeline(library, @"flinch_blur");
             finish_ = pipeline(library, @"flinch_finish");
+            if (!geometry_ || !blur_ || !finish_) message = "Metal pipelines failed to build";
             return geometry_ && blur_ && finish_;
         }
     }
@@ -78,10 +87,13 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Backend> make_metal(void* device, void* queue) {
-    if (!device || !queue) return nullptr;
+std::unique_ptr<Backend> make_metal(void* device, void* queue, std::string& error) {
+    if (!device || !queue) {
+        error = "no Metal device";
+        return nullptr;
+    }
     auto backend = std::make_unique<MetalBackend>((__bridge id<MTLDevice>)device, (__bridge id<MTLCommandQueue>)queue);
-    if (!backend->init()) return nullptr;
+    if (!backend->init(error)) return nullptr;
     return backend;
 }
 

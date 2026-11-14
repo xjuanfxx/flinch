@@ -119,7 +119,9 @@ private:
             return false;
         int dev = 0;
         if (cu_init(0) != 0 || device_get(&dev, 0) != 0 || ctx_create(&ctx_, 0, dev) != 0) return false;
-        backend_ = flinch::gpu::make_cuda(ctx_, nullptr);
+        std::string error;
+        backend_ = flinch::gpu::make_cuda(ctx_, nullptr, error);
+        if (!backend_) std::printf("  CUDA: %s\n", error.c_str());
         return backend_ != nullptr;
     }
 
@@ -194,7 +196,9 @@ private:
             char vendor[128] = {};
             get_platform_info(platforms[i], 0x0903 /* CL_PLATFORM_NAME */, sizeof(vendor), vendor, nullptr);
             label_ = std::string("OpenCL (") + vendor + ")";
-            backend_ = flinch::gpu::make_opencl(ctx_, device, queue_);
+            std::string error;
+            backend_ = flinch::gpu::make_opencl(ctx_, device, queue_, error);
+            if (!backend_) std::printf("  %s: %s\n", label_.c_str(), error.c_str());
         }
         return backend_ != nullptr;
     }

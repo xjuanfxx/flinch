@@ -7,6 +7,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "flinch_gpu_types.h"
 
@@ -21,10 +22,10 @@ public:
     virtual bool finish(void* geo, void* blurred, void* dst, const FlinchFinishParams& p) = 0;
 };
 
-// Each factory returns nullptr if the framework or the kernels are unavailable;
-// After Effects then renders Flinch on the CPU.
-std::unique_ptr<Backend> make_cuda(void* context, void* stream);
-std::unique_ptr<Backend> make_opencl(void* context, void* device, void* queue);
-std::unique_ptr<Backend> make_metal(void* device, void* queue);
+// Each factory returns nullptr if the framework or the kernels are unavailable,
+// with a short reason in `error`; After Effects then renders Flinch on the CPU.
+std::unique_ptr<Backend> make_cuda(void* context, void* stream, std::string& error);
+std::unique_ptr<Backend> make_opencl(void* context, void* device, void* queue, std::string& error);
+std::unique_ptr<Backend> make_metal(void* device, void* queue, std::string& error);
 
 }  // namespace flinch::gpu

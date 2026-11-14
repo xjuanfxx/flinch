@@ -111,12 +111,18 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Backend> make_opencl(void* context, void* device, void* queue) {
+std::unique_ptr<Backend> make_opencl(void* context, void* device, void* queue, std::string& error) {
     static OpenCLApi api;
     static const bool loaded = api.load();
-    if (!loaded || !context || !device || !queue) return nullptr;
+    if (!loaded || !context || !device || !queue) {
+        error = loaded ? "no OpenCL device" : "OpenCL driver not found";
+        return nullptr;
+    }
     auto backend = std::make_unique<OpenCLBackend>(api, context, device, queue);
-    if (!backend->init()) return nullptr;
+    if (!backend->init()) {
+        error = "OpenCL kernels failed to build";
+        return nullptr;
+    }
     return backend;
 }
 
@@ -125,7 +131,10 @@ std::unique_ptr<Backend> make_opencl(void* context, void* device, void* queue) {
 #else
 
 namespace flinch::gpu {
-std::unique_ptr<Backend> make_opencl(void*, void*, void*) { return nullptr; }
+std::unique_ptr<Backend> make_opencl(void*, void*, void*, std::string& error) {
+    error = "OpenCL is only available on Windows";
+    return nullptr;
+}
 }  // namespace flinch::gpu
 
 #endif

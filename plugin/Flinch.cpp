@@ -4,9 +4,11 @@
 // All operator logic lives in core/include.
 #include "Flinch.h"
 
+#include <atomic>
 #include <cstring>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "AE_EffectGPUSuites.h"
@@ -17,6 +19,25 @@
 namespace {
 
 constexpr A_long kInputCheckout = 0;
+
+// What the About box reports, so users can tell whether Flinch renders on the GPU.
+struct Status {
+    std::atomic<int> framework{PF_GPU_Framework_NONE};  // of the last GPU device setup
+    std::atomic<bool> gpu_ready{false};                 // our kernels loaded on it
+    std::atomic<int> last_render{0};                    // 0 none yet, 1 CPU, 2 GPU
+    std::mutex mutex;
+    std::string gpu_error;  // why the kernels did not load
+};
+Status g_status;
+
+const char* framework_name(int what_gpu) {
+    switch (what_gpu) {
+        case PF_GPU_Framework_CUDA: return "CUDA";
+        case PF_GPU_Framework_OPENCL: return "OpenCL";
+        case PF_GPU_Framework_METAL: return "Metal";
+        default: return "none";
+    }
+}
 
 // What PreRender computes and SmartRender consumes.
 struct RenderInfo {
@@ -317,13 +338,23 @@ flinch::Params read_params(PF_InData* in_data, A_long time, double pixel_scale, 
 // ---------------------------------------------------------------------------
 
 // The About box is plain text, at most PF_MAX_EFFECT_MSG_LEN (255) chars; \r breaks lines.
-PF_Err About(PF_InData* in_data, PF_OutData* out_data) {
-    AEGP_SuiteHandler suites(in_data->pica_basicP);
-    suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
-                                          "%s %d.%d.%d\r"
-                                          "Random jolts for your layers.",
-                                          FLINCH_NAME, FLINCH_MAJOR_VERSION, FLINCH_MINOR_VERSION,
-                                          FLINCH_BUG_VERSION);
+// Besides the version it shows the GPU state, to diagnose renders that stay on the CPU.
+PF_Err About(PF_OutData* out_data) {
+    std::string gpu;
+    const int framework = g_status.framework.load();
+    if (framework == PF_GPU_Framework_NONE) {
+        gpu = "not offered by After Effects (Mercury Software Only?)";
+    } else if (g_status.gpu_ready) {
+        gpu = std::string(framework_name(framework)) + ", ready";
+    } else {
+        std::lock_guard<std::mutex> lock(g_status.mutex);
+        gpu = std::string(framework_name(framework)) + " failed: " + g_status.gpu_error;
+    }
+    static const char* const kRender[] = {"none yet", "CPU", "GPU"};
+    std::snprintf(out_data->return_msg, sizeof(out_data->return_msg),
+                  "%s %d.%d.%d\rRandom jolts for your layers.\r\rGPU: %s\rLast frame: %s", FLINCH_NAME,
+                  FLINCH_MAJOR_VERSION, FLINCH_MINOR_VERSION, FLINCH_BUG_VERSION, gpu.c_str(),
+                  kRender[g_status.last_render.load()]);
     return PF_Err_NONE;
 }
 
@@ -533,6 +564,7 @@ PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra
     PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
     const auto* info = static_cast<const RenderInfo*>(extra->input->pre_render_data);
     if (!info) return PF_Err_BAD_CALLBACK_PARAM;
+    g_status.last_render = 1;
 
     PF_EffectWorld *input = nullptr, *output = nullptr;
     ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kInputCheckout, &input));
@@ -571,21 +603,27 @@ PF_Err GpuDeviceSetup(PF_InData* in_data, PF_OutData* out_data, PF_GPUDeviceSetu
     if (err) return err;
 
     std::unique_ptr<flinch::gpu::Backend> backend;
+    std::string error = "unsupported framework";
     switch (extra->input->what_gpu) {
         case PF_GPU_Framework_CUDA:
-            backend = flinch::gpu::make_cuda(device.contextPV, device.command_queuePV);
+            backend = flinch::gpu::make_cuda(device.contextPV, device.command_queuePV, error);
             break;
         case PF_GPU_Framework_OPENCL:
-            backend = flinch::gpu::make_opencl(device.contextPV, device.devicePV, device.command_queuePV);
+            backend = flinch::gpu::make_opencl(device.contextPV, device.devicePV, device.command_queuePV, error);
             break;
         case PF_GPU_Framework_METAL:
-            backend = flinch::gpu::make_metal(device.devicePV, device.command_queuePV);
+            backend = flinch::gpu::make_metal(device.devicePV, device.command_queuePV, error);
             break;
         default: break;
     }
+    g_status.framework = extra->input->what_gpu;
+    g_status.gpu_ready = backend != nullptr;
     if (backend) {
         extra->output->gpu_data = backend.release();
         out_data->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    } else {
+        std::lock_guard<std::mutex> lock(g_status.mutex);
+        g_status.gpu_error = error;
     }
     return err;
 }
@@ -629,6 +667,7 @@ PF_Err SmartRenderGpu(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderEx
     const auto* info = static_cast<const RenderInfo*>(extra->input->pre_render_data);
     auto* backend = static_cast<flinch::gpu::Backend*>(const_cast<void*>(extra->input->gpu_data));
     if (!info || !backend) return PF_Err_BAD_CALLBACK_PARAM;
+    g_status.last_render = 2;
 
     PF_EffectWorld *input = nullptr, *output = nullptr;
     ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kInputCheckout, &input));
@@ -690,7 +729,7 @@ PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data, PF_Param
     PF_Err err = PF_Err_NONE;
     try {
         switch (cmd) {
-            case PF_Cmd_ABOUT: err = About(in_data, out_data); break;
+            case PF_Cmd_ABOUT: err = About(out_data); break;
             case PF_Cmd_GLOBAL_SETUP: err = GlobalSetup(out_data); break;
             case PF_Cmd_PARAMS_SETUP: err = ParamsSetup(in_data, out_data); break;
             case PF_Cmd_UPDATE_PARAMS_UI:
