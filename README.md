@@ -47,7 +47,7 @@ on their own and fade in and out over a few frames.
 | After Effects 2022–2025, Windows x64 | Expected to work, not tested |
 | After Effects 2022+, macOS (Apple Silicon / Intel) | Builds and passes tests in CI; not tested inside After Effects yet |
 
-Current version: **0.2.0**. Details in [INSTALL.md](INSTALL.md#compatibility).
+Current version: **0.2.1**. Details in [INSTALL.md](INSTALL.md#compatibility).
 
 ## Project layout
 
