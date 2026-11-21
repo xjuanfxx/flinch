@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
   add_compile_options(/W4 /utf-8)
+  # Static C++ runtime: hosts ship their own, often older, MSVCP140.dll (After
+  # Effects 2022 does), and code built with a newer toolset crashes against it
+  # (e.g. in std::mutex). Linking the runtime in avoids depending on the host's.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 add_library(flinch_core INTERFACE)
